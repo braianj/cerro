@@ -1,0 +1,4 @@
+# GitHub Pages configuration
+# This file tells GitHub Pages to serve files from the root directory
+
+# No build process needed - serving static HTML file directly
