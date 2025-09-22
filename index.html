@@ -240,6 +240,22 @@
             align-items: center;
         }
 
+        .watermark-link-btn {
+            background-color: #e67e22;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+            margin-right: 10px;
+        }
+
+        .watermark-link-btn:hover {
+            background-color: #d35400;
+        }
+
         .download-btn {
             background-color: #27ae60;
             color: white;
@@ -462,6 +478,8 @@
     <div class="modal" id="modal" onclick="closeModal()">
         <div class="modal-content">
             <div class="modal-header">
+                <button class="watermark-link-btn" id="watermarkLinkBtn" onclick="openWatermarkRemover(event)">Remover
+                    marca de agua</button>
                 <button class="download-btn" id="downloadBtn" onclick="downloadImage(event)">Descargar</button>
                 <span class="close" onclick="closeModal()">&times;</span>
             </div>
@@ -1136,6 +1154,7 @@
             const modalImage = document.getElementById('modalImage');
             const imageInfo = document.getElementById('imageInfo');
 
+            // Mostrar imagen con marca de agua
             modalImage.src = image.copyFileName;
 
             const date = new Date(image.creationDate).toLocaleDateString('es-ES');
@@ -1161,6 +1180,36 @@
 
         function closeModal() {
             document.getElementById('modal').style.display = 'none';
+        }
+
+        function openWatermarkRemover(event) {
+            event.stopPropagation();
+
+            const modalImage = document.getElementById('modalImage');
+            const imageUrl = modalImage.src;
+
+            // Copiar URL al portapapeles
+            navigator.clipboard.writeText(imageUrl).then(() => {
+                // Mostrar mensaje de confirmación
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.textContent = '¡URL copiada!';
+                btn.style.backgroundColor = '#27ae60';
+
+                // Restaurar botón después de 2 segundos
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.style.backgroundColor = '#e67e22';
+                }, 2000);
+
+                // Abrir WatermarkRemover.io en nueva pestaña
+                window.open('https://www.watermarkremover.io/', '_blank');
+            }).catch(err => {
+                console.error('Error copiando al portapapeles:', err);
+                // Fallback: abrir directamente con la URL como parámetro
+                const watermarkUrl = `https://www.watermarkremover.io/?url=${encodeURIComponent(imageUrl)}`;
+                window.open(watermarkUrl, '_blank');
+            });
         }
 
         function downloadImage(event) {
