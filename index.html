@@ -40,6 +40,14 @@
             font-size: 1.8em;
         }
 
+        .last-update {
+            text-align: center;
+            font-size: 10px;
+            color: #7f8c8d;
+            margin-bottom: 15px;
+            font-style: italic;
+        }
+
         .date-filters {
             display: flex;
             justify-content: center;
@@ -411,6 +419,7 @@
     <div class="container">
         <header>
             <h1>Galería de Imágenes Cerro</h1>
+            <div class="last-update">Última actualización de la web: <span id="lastUpdateDate"></span></div>
             <div class="date-filters">
                 <label for="dateFrom">Desde:</label>
                 <input type="date" id="dateFrom" value="">
@@ -1275,8 +1284,44 @@
             gallery.innerHTML = `<div class="error">${message}</div>`;
         }
 
+        function setLastUpdateDate() {
+            // Obtener fecha del último commit desde GitHub API
+            fetch('https://api.github.com/repos/braianj/cerro/commits?per_page=1')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Error al obtener datos de GitHub');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data && data.length > 0) {
+                        const commitDate = new Date(data[0].commit.committer.date);
+                        const options = {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        };
+                        const formattedDate = commitDate.toLocaleDateString('es-ES', options);
+                        document.getElementById('lastUpdateDate').textContent = formattedDate;
+                    } else {
+                        // Fallback si no hay commits
+                        document.getElementById('lastUpdateDate').textContent = 'No disponible';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error obteniendo fecha del commit:', error);
+                    // Fallback en caso de error
+                    document.getElementById('lastUpdateDate').textContent = 'Error al cargar';
+                });
+        }
+
         // Cargar imágenes al iniciar la página
         document.addEventListener('DOMContentLoaded', function () {
+            // Establecer fecha de última actualización
+            setLastUpdateDate();
+
             // Aplicar parámetros URL primero
             applyUrlParams();
 
