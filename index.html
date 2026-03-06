@@ -358,43 +358,6 @@
             background-color: #d35400;
         }
 
-        .watermark-link-btn.processing {
-            background-color: #95a5a6;
-            cursor: wait;
-        }
-
-        .watermark-link-btn.done {
-            background-color: #27ae60;
-        }
-
-        #watermarkCanvas {
-            display: none;
-            max-width: 100%;
-            max-height: 70vh;
-            margin: 0 auto;
-            border-radius: 8px;
-        }
-
-        #watermarkCanvas.visible {
-            display: block;
-        }
-
-        .watermark-toggle {
-            display: none;
-            background-color: #3498db;
-            color: white;
-            border: none;
-            padding: 6px 10px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 12px;
-            margin-right: 5px;
-        }
-
-        .watermark-toggle.visible {
-            display: inline-block;
-        }
-
         .download-btn {
             background-color: #27ae60;
             color: white;
@@ -625,13 +588,12 @@
     <div class="modal" id="modal" onclick="closeModal()">
         <div class="modal-content">
             <div class="modal-header">
-                <button class="watermark-link-btn" id="watermarkLinkBtn" onclick="removeWatermark(event)">Remover marca de agua</button>
-                <button class="watermark-toggle" id="watermarkToggle" onclick="toggleWatermarkView(event)">Ver original</button>
+                <button class="watermark-link-btn" id="watermarkLinkBtn" onclick="openWatermarkRemover(event)">Remover
+                    marca de agua</button>
                 <button class="download-btn" id="downloadBtn" onclick="downloadImage(event)">Descargar</button>
                 <span class="close" onclick="closeModal()">&times;</span>
             </div>
             <img id="modalImage" src="" alt="">
-            <canvas id="watermarkCanvas"></canvas>
             <div class="image-info" id="imageInfo"></div>
         </div>
     </div>
@@ -1409,17 +1371,8 @@
             const modal = document.getElementById('modal');
             const modalImage = document.getElementById('modalImage');
             const imageInfo = document.getElementById('imageInfo');
-            const canvas = document.getElementById('watermarkCanvas');
-            const toggle = document.getElementById('watermarkToggle');
-            const wmBtn = document.getElementById('watermarkLinkBtn');
 
-            // Reset state
             modalImage.src = image.copyFileName;
-            modalImage.style.display = 'block';
-            canvas.className = '';
-            toggle.className = 'watermark-toggle';
-            wmBtn.textContent = 'Remover marca de agua';
-            wmBtn.className = 'watermark-link-btn';
 
             const date = new Date(image.creationDate).toLocaleDateString('es-ES');
             const exif = image.exifData;
@@ -1446,217 +1399,48 @@
             document.getElementById('modal').style.display = 'none';
         }
 
-        function toggleWatermarkView(event) {
+        function openWatermarkRemover(event) {
             event.stopPropagation();
-            const img = document.getElementById('modalImage');
-            const canvas = document.getElementById('watermarkCanvas');
-            const btn = document.getElementById('watermarkToggle');
 
-            if (canvas.classList.contains('visible')) {
-                // Show original
-                canvas.classList.remove('visible');
-                img.style.display = 'block';
-                btn.textContent = 'Ver sin marca';
-            } else {
-                // Show cleaned
-                canvas.classList.add('visible');
-                img.style.display = 'none';
-                btn.textContent = 'Ver original';
-            }
-        }
-
-        function removeWatermark(event) {
-            event.stopPropagation();
-            const btn = document.getElementById('watermarkLinkBtn');
             const modalImage = document.getElementById('modalImage');
-            const canvas = document.getElementById('watermarkCanvas');
-            const toggle = document.getElementById('watermarkToggle');
+            const imageUrl = modalImage.src;
 
-            btn.textContent = 'Procesando...';
-            btn.classList.add('processing');
+            // Copiar URL al portapapeles
+            navigator.clipboard.writeText(imageUrl).then(() => {
+                // Mostrar mensaje de confirmación
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.textContent = '¡URL copiada!';
+                btn.style.backgroundColor = '#27ae60';
 
-            // Load image via CORS proxy
-            const corsImg = new Image();
-            corsImg.crossOrigin = 'anonymous';
-            corsImg.onload = () => {
-                try {
-                    // Scale down for performance (max 1200px wide)
-                    const maxW = 1200;
-                    const scale = corsImg.naturalWidth > maxW ? maxW / corsImg.naturalWidth : 1;
-                    const w = Math.round(corsImg.naturalWidth * scale);
-                    const h = Math.round(corsImg.naturalHeight * scale);
+                // Restaurar botón después de 2 segundos
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.style.backgroundColor = '#e67e22';
+                }, 2000);
 
-                    canvas.width = w;
-                    canvas.height = h;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(corsImg, 0, 0, w, h);
-
-                    const imageData = ctx.getImageData(0, 0, w, h);
-                    processWatermarkRemoval(imageData, w, h);
-                    ctx.putImageData(imageData, 0, 0);
-
-                    // Show canvas, hide original
-                    canvas.classList.add('visible');
-                    modalImage.style.display = 'none';
-                    toggle.classList.add('visible');
-
-                    btn.textContent = 'Marca removida';
-                    btn.classList.remove('processing');
-                    btn.classList.add('done');
-                } catch(e) {
-                    console.error('Watermark removal error:', e);
-                    btn.textContent = 'Error - reintentar';
-                    btn.classList.remove('processing');
-                }
-            };
-            corsImg.onerror = () => {
-                btn.textContent = 'Error de carga';
-                btn.classList.remove('processing');
-            };
-            corsImg.src = 'https://corsproxy.io/?' + encodeURIComponent(modalImage.src);
-        }
-
-        function processWatermarkRemoval(imageData, w, h) {
-            const data = imageData.data;
-            const R = 35; // Large radius so window extends well beyond watermark elements
-            const stride = w + 1;
-
-            // === INTEGRAL IMAGES (for fast box-average) ===
-            const integralR = new Float64Array(stride * (h + 1));
-            const integralG = new Float64Array(stride * (h + 1));
-            const integralB = new Float64Array(stride * (h + 1));
-
-            for (let y = 0; y < h; y++) {
-                let rowR = 0, rowG = 0, rowB = 0;
-                for (let x = 0; x < w; x++) {
-                    const idx = (y * w + x) * 4;
-                    rowR += data[idx]; rowG += data[idx + 1]; rowB += data[idx + 2];
-                    const iIdx = (y + 1) * stride + (x + 1);
-                    const above = y * stride + (x + 1);
-                    integralR[iIdx] = rowR + integralR[above];
-                    integralG[iIdx] = rowG + integralG[above];
-                    integralB[iIdx] = rowB + integralB[above];
-                }
-            }
-
-            function getAvg(integ, x, y, r) {
-                const x0 = Math.max(0, x - r), y0 = Math.max(0, y - r);
-                const x1 = Math.min(w - 1, x + r), y1 = Math.min(h - 1, y + r);
-                const count = (x1 - x0 + 1) * (y1 - y0 + 1);
-                const d = (y1 + 1) * stride + (x1 + 1);
-                const b = y0 * stride + (x1 + 1);
-                const c = (y1 + 1) * stride + x0;
-                const a = y0 * stride + x0;
-                return (integ[d] - integ[b] - integ[c] + integ[a]) / count;
-            }
-
-            // === PASS 1: Detect candidate watermark pixels ===
-            // Watermark is semi-transparent gray overlay (~25-35% opacity, gray ~140-160)
-            // Creates moderate, uniform brightness shift (15-40 units).
-            // Real edges (skier vs snow) create LARGE deviations (80+) — must be excluded.
-            const isWM = new Uint8Array(w * h);
-            const minDev = 7;   // Minimum deviation to consider
-            const maxDev = 55;  // Maximum — above this it's a real edge, not watermark
-
-            for (let y = 0; y < h; y++) {
-                for (let x = 0; x < w; x++) {
-                    const idx = (y * w + x) * 4;
-                    const r = data[idx], g = data[idx + 1], b = data[idx + 2];
-                    const aR = getAvg(integralR, x, y, R);
-                    const aG = getAvg(integralG, x, y, R);
-                    const aB = getAvg(integralB, x, y, R);
-
-                    const devR = r - aR, devG = g - aG, devB = b - aB;
-                    const avgDev = (devR + devG + devB) / 3;
-                    const absAvg = Math.abs(avgDev);
-
-                    // Uniform channel shift (watermark is gray, affects R≈G≈B similarly)
-                    const spread = Math.abs(devR - avgDev) + Math.abs(devG - avgDev) + Math.abs(devB - avgDev);
-
-                    // Must be moderate deviation (not too small, not too large) with uniform channels
-                    if (absAvg > minDev && absAvg < maxDev && spread < absAvg * 1.8) {
-                        isWM[y * w + x] = 1;
-                    }
-                }
-            }
-
-            // === PASS 2: Build clean-pixel-only integral images ===
-            const cleanR = new Float64Array(stride * (h + 1));
-            const cleanG = new Float64Array(stride * (h + 1));
-            const cleanB = new Float64Array(stride * (h + 1));
-            const cleanC = new Float64Array(stride * (h + 1));
-
-            for (let y = 0; y < h; y++) {
-                let rowR = 0, rowG = 0, rowB = 0, rowN = 0;
-                for (let x = 0; x < w; x++) {
-                    if (!isWM[y * w + x]) {
-                        const idx = (y * w + x) * 4;
-                        rowR += data[idx]; rowG += data[idx + 1]; rowB += data[idx + 2];
-                        rowN += 1;
-                    }
-                    const iIdx = (y + 1) * stride + (x + 1);
-                    const above = y * stride + (x + 1);
-                    cleanR[iIdx] = rowR + cleanR[above];
-                    cleanG[iIdx] = rowG + cleanG[above];
-                    cleanB[iIdx] = rowB + cleanB[above];
-                    cleanC[iIdx] = rowN + cleanC[above];
-                }
-            }
-
-            function getCleanAvg(x, y, r) {
-                const x0 = Math.max(0, x - r), y0 = Math.max(0, y - r);
-                const x1 = Math.min(w - 1, x + r), y1 = Math.min(h - 1, y + r);
-                const d = (y1 + 1) * stride + (x1 + 1);
-                const b = y0 * stride + (x1 + 1);
-                const c = (y1 + 1) * stride + x0;
-                const a = y0 * stride + x0;
-                const n = cleanC[d] - cleanC[b] - cleanC[c] + cleanC[a];
-                if (n < 5) return null;
-                return [
-                    (cleanR[d] - cleanR[b] - cleanR[c] + cleanR[a]) / n,
-                    (cleanG[d] - cleanG[b] - cleanG[c] + cleanG[a]) / n,
-                    (cleanB[d] - cleanB[b] - cleanB[c] + cleanB[a]) / n
-                ];
-            }
-
-            // === PASS 3: Correct watermark pixels toward clean local average ===
-            // Cap correction so we never shift more than the watermark could have added
-            const strength = 0.80;
-            const maxCorrection = 40; // Max per-channel shift in pixels
-            for (let y = 0; y < h; y++) {
-                for (let x = 0; x < w; x++) {
-                    if (!isWM[y * w + x]) continue;
-                    const avg = getCleanAvg(x, y, R);
-                    if (!avg) continue;
-                    const idx = (y * w + x) * 4;
-                    for (let c = 0; c < 3; c++) {
-                        const diff = (avg[c] - data[idx + c]) * strength;
-                        const capped = Math.sign(diff) * Math.min(Math.abs(diff), maxCorrection);
-                        data[idx + c] = Math.max(0, Math.min(255, Math.round(data[idx + c] + capped)));
-                    }
-                }
-            }
+                // Abrir WatermarkRemover.io en nueva pestaña
+                window.open('https://www.watermarkremover.io/', '_blank');
+            }).catch(err => {
+                console.error('Error copiando al portapapeles:', err);
+                // Fallback: abrir directamente con la URL como parámetro
+                const watermarkUrl = `https://www.watermarkremover.io/?url=${encodeURIComponent(imageUrl)}`;
+                window.open(watermarkUrl, '_blank');
+            });
         }
 
         function downloadImage(event) {
-            event.stopPropagation();
-            const canvas = document.getElementById('watermarkCanvas');
-            const modalImage = document.getElementById('modalImage');
-            const imageUrl = modalImage.src;
+            event.stopPropagation(); // Evitar que se cierre el modal
+            const imageUrl = document.getElementById('modalImage').src;
             const imageName = imageUrl.split('/').pop() || 'imagen.jpg';
 
+            // Crear un elemento 'a' temporal para descargar
             const link = document.createElement('a');
+            link.href = imageUrl;
+            link.download = imageName;
+            link.target = '_blank';
 
-            // If watermark was removed and canvas is visible, download the cleaned version
-            if (canvas.classList.contains('visible')) {
-                link.href = canvas.toDataURL('image/jpeg', 0.95);
-                link.download = imageName.replace(/\.[^.]+$/, '') + '_clean.jpg';
-            } else {
-                link.href = imageUrl;
-                link.download = imageName;
-                link.target = '_blank';
-            }
-
+            // Trigger de descarga
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
