@@ -358,6 +358,43 @@
             background-color: #d35400;
         }
 
+        .watermark-link-btn.processing {
+            background-color: #95a5a6;
+            cursor: wait;
+        }
+
+        .watermark-link-btn.done {
+            background-color: #27ae60;
+        }
+
+        #watermarkCanvas {
+            display: none;
+            max-width: 100%;
+            max-height: 70vh;
+            margin: 0 auto;
+            border-radius: 8px;
+        }
+
+        #watermarkCanvas.visible {
+            display: block;
+        }
+
+        .watermark-toggle {
+            display: none;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 6px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-right: 5px;
+        }
+
+        .watermark-toggle.visible {
+            display: inline-block;
+        }
+
         .download-btn {
             background-color: #27ae60;
             color: white;
@@ -588,12 +625,13 @@
     <div class="modal" id="modal" onclick="closeModal()">
         <div class="modal-content">
             <div class="modal-header">
-                <button class="watermark-link-btn" id="watermarkLinkBtn" onclick="openWatermarkRemover(event)">Remover
-                    marca de agua</button>
+                <button class="watermark-link-btn" id="watermarkLinkBtn" onclick="removeWatermark(event)">Remover marca de agua</button>
+                <button class="watermark-toggle" id="watermarkToggle" onclick="toggleWatermarkView(event)">Ver original</button>
                 <button class="download-btn" id="downloadBtn" onclick="downloadImage(event)">Descargar</button>
                 <span class="close" onclick="closeModal()">&times;</span>
             </div>
             <img id="modalImage" src="" alt="">
+            <canvas id="watermarkCanvas"></canvas>
             <div class="image-info" id="imageInfo"></div>
         </div>
     </div>
@@ -606,7 +644,7 @@
         let photographers = [];
         let availableTags = [];
         let favorites = JSON.parse(localStorage.getItem('cerro-favorites') || '[]');
-        let imageColors = new Map(); // Cache for dominant colors
+        let imageColors = new Map(); // Cache: imageId -> array of color strings
         let tagsLoaded = false; // Flag to prevent reloading tags
 
         // URL Parameters functionality
@@ -967,18 +1005,25 @@
 
         // Persistent color cache in localStorage
         const COLOR_CACHE_KEY = 'cerro-image-colors';
+        const COLOR_CACHE_VERSION = 'v3'; // Bump to invalidate cache
         function loadColorCache() {
             try {
-                const cached = JSON.parse(localStorage.getItem(COLOR_CACHE_KEY) || '{}');
-                for (const [id, color] of Object.entries(cached)) {
-                    imageColors.set(id, color);
+                const raw = localStorage.getItem(COLOR_CACHE_KEY);
+                if (!raw) return;
+                const parsed = JSON.parse(raw);
+                if (parsed._version !== COLOR_CACHE_VERSION) {
+                    localStorage.removeItem(COLOR_CACHE_KEY);
+                    return;
                 }
-            } catch(e) {}
+                for (const [id, colors] of Object.entries(parsed)) {
+                    if (id !== '_version') imageColors.set(id, colors);
+                }
+            } catch(e) { localStorage.removeItem(COLOR_CACHE_KEY); }
         }
         function saveColorCache() {
             try {
-                const obj = {};
-                imageColors.forEach((color, id) => { obj[id] = color; });
+                const obj = { _version: COLOR_CACHE_VERSION };
+                imageColors.forEach((colors, id) => { obj[id] = colors; });
                 localStorage.setItem(COLOR_CACHE_KEY, JSON.stringify(obj));
             } catch(e) {}
         }
@@ -987,7 +1032,7 @@
         // Queue to limit concurrent proxy requests
         let colorAnalysisQueue = [];
         let activeAnalysis = 0;
-        const MAX_CONCURRENT = 4;
+        const MAX_CONCURRENT = 6;
 
         function processColorQueue() {
             while (activeAnalysis < MAX_CONCURRENT && colorAnalysisQueue.length > 0) {
@@ -1000,79 +1045,94 @@
             }
         }
 
+        // Returns array of all colors present in the image (>= 3% of pixels)
         function analyzePixels(sourceImg) {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            const sampleSize = 50;
+            const sampleSize = 80;
             canvas.width = sampleSize;
             canvas.height = sampleSize;
-            ctx.drawImage(sourceImg, 0, 0, sampleSize, sampleSize);
+
+            const sw = sourceImg.naturalWidth || sourceImg.width;
+            const sh = sourceImg.naturalHeight || sourceImg.height;
+
+            // Sample center 60% of image (where subject is)
+            const cropX = sw * 0.2;
+            const cropY = sh * 0.15;
+            const cropW = sw * 0.6;
+            const cropH = sh * 0.7;
+            ctx.drawImage(sourceImg, cropX, cropY, cropW, cropH, 0, 0, sampleSize, sampleSize);
             const imageData = ctx.getImageData(0, 0, sampleSize, sampleSize);
             const data = imageData.data;
 
             const colorCounts = {};
-            const step = 4;
-            for (let i = 0; i < data.length; i += 4 * step) {
+            let totalPixels = 0;
+            for (let i = 0; i < data.length; i += 4) {
                 const r = data[i];
                 const g = data[i + 1];
                 const b = data[i + 2];
                 const a = data[i + 3];
                 if (a < 128) continue;
+                totalPixels++;
                 const category = getColorCategory(r, g, b);
                 colorCounts[category] = (colorCounts[category] || 0) + 1;
             }
 
-            let dominant = 'gris';
-            let maxCount = 0;
+            if (totalPixels === 0) return ['gris'];
+
+            // Return all colors with >= 3% presence
+            const MIN_PRESENCE = 0.03;
+            const presentColors = [];
             for (const [color, count] of Object.entries(colorCounts)) {
-                if (count > maxCount) {
-                    maxCount = count;
-                    dominant = color;
+                if (count / totalPixels >= MIN_PRESENCE) {
+                    presentColors.push(color);
                 }
             }
-            return dominant;
+
+            return presentColors.length > 0 ? presentColors : ['gris'];
         }
 
-        // Extract dominant color using CORS proxy for canvas analysis
-        function extractDominantColor(img, imageId) {
+        // Extract colors from image using CORS proxy
+        function extractImageColors(img, imageId) {
             return new Promise((resolve) => {
-                // Check memory cache
                 if (imageColors.has(imageId)) {
                     resolve(imageColors.get(imageId));
                     return;
                 }
 
-                const storeResult = (color) => {
-                    imageColors.set(imageId, color);
+                const storeResult = (colors) => {
+                    imageColors.set(imageId, colors);
                     saveColorCache();
-                    resolve(color);
+                    resolve(colors);
                 };
 
-                // Queue the analysis to limit concurrent requests
                 const task = () => new Promise((taskDone) => {
                     const corsImg = new Image();
                     corsImg.crossOrigin = 'anonymous';
                     corsImg.onload = () => {
                         try {
-                            const dominant = analyzePixels(corsImg);
-                            storeResult(dominant);
+                            const colors = analyzePixels(corsImg);
+                            storeResult(colors);
                         } catch(e) {
-                            storeResult('gris'); // Fallback if canvas fails
+                            storeResult(['gris']);
                         }
                         taskDone();
                     };
                     corsImg.onerror = () => {
-                        storeResult('gris');
+                        storeResult(['gris']);
                         taskDone();
                     };
-                    // Use CORS proxy for S3 images
-                    const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(img.src);
-                    corsImg.src = proxyUrl;
+                    corsImg.src = 'https://corsproxy.io/?' + encodeURIComponent(img.src);
                 });
 
                 colorAnalysisQueue.push(task);
                 processColorQueue();
             });
+        }
+
+        // Keep backward compat alias
+        function extractDominantColor(img, imageId) {
+            return extractImageColors(img, imageId);
         }
 
         let selectedColorFilter = ''; // Currently active color filter
@@ -1203,14 +1263,11 @@
             if (existingNoResults) existingNoResults.remove();
 
             if (!color) {
-                // Show all images
-                allContainers.forEach(container => {
-                    container.style.display = '';
-                });
+                allContainers.forEach(container => { container.style.display = ''; });
                 return;
             }
 
-            // Analyze colors if needed, then filter
+            // Filter: show images that CONTAIN the selected color
             let visibleCount = 0;
             const promises = [];
 
@@ -1222,8 +1279,8 @@
                     return;
                 }
 
-                const promise = extractDominantColor(img, imageId).then(dominantColor => {
-                    if (dominantColor === color) {
+                const promise = extractImageColors(img, imageId).then(colors => {
+                    if (Array.isArray(colors) && colors.includes(color)) {
                         container.style.display = '';
                         visibleCount++;
                     } else {
@@ -1234,14 +1291,12 @@
             });
 
             await Promise.all(promises);
-
-            // Update swatch counts
             updateColorCounts();
 
             if (visibleCount === 0) {
                 const noResults = document.createElement('div');
                 noResults.className = 'no-color-results';
-                noResults.innerHTML = `No se encontraron imágenes con color dominante: ${color}`;
+                noResults.innerHTML = `No se encontraron imágenes que contengan color: ${color}`;
                 noResults.style.cssText = 'text-align:center;padding:40px;color:#666;font-size:16px;grid-column:1/-1;';
                 gallery.appendChild(noResults);
             }
@@ -1249,15 +1304,17 @@
 
         function updateColorCounts() {
             const counts = {};
-            imageColors.forEach((color) => {
-                counts[color] = (counts[color] || 0) + 1;
+            imageColors.forEach((colors) => {
+                if (!Array.isArray(colors)) colors = [colors];
+                colors.forEach(color => {
+                    counts[color] = (counts[color] || 0) + 1;
+                });
             });
 
             document.querySelectorAll('.color-swatch').forEach(swatch => {
                 const color = swatch.dataset.color;
                 const count = counts[color] || 0;
 
-                // Remove existing badge
                 const existing = swatch.querySelector('.color-count-badge');
                 if (existing) existing.remove();
 
@@ -1352,9 +1409,17 @@
             const modal = document.getElementById('modal');
             const modalImage = document.getElementById('modalImage');
             const imageInfo = document.getElementById('imageInfo');
+            const canvas = document.getElementById('watermarkCanvas');
+            const toggle = document.getElementById('watermarkToggle');
+            const wmBtn = document.getElementById('watermarkLinkBtn');
 
-            // Mostrar imagen con marca de agua
+            // Reset state
             modalImage.src = image.copyFileName;
+            modalImage.style.display = 'block';
+            canvas.className = '';
+            toggle.className = 'watermark-toggle';
+            wmBtn.textContent = 'Remover marca de agua';
+            wmBtn.className = 'watermark-link-btn';
 
             const date = new Date(image.creationDate).toLocaleDateString('es-ES');
             const exif = image.exifData;
@@ -1381,48 +1446,176 @@
             document.getElementById('modal').style.display = 'none';
         }
 
-        function openWatermarkRemover(event) {
+        function toggleWatermarkView(event) {
             event.stopPropagation();
+            const img = document.getElementById('modalImage');
+            const canvas = document.getElementById('watermarkCanvas');
+            const btn = document.getElementById('watermarkToggle');
 
+            if (canvas.classList.contains('visible')) {
+                // Show original
+                canvas.classList.remove('visible');
+                img.style.display = 'block';
+                btn.textContent = 'Ver sin marca';
+            } else {
+                // Show cleaned
+                canvas.classList.add('visible');
+                img.style.display = 'none';
+                btn.textContent = 'Ver original';
+            }
+        }
+
+        function removeWatermark(event) {
+            event.stopPropagation();
+            const btn = document.getElementById('watermarkLinkBtn');
             const modalImage = document.getElementById('modalImage');
-            const imageUrl = modalImage.src;
+            const canvas = document.getElementById('watermarkCanvas');
+            const toggle = document.getElementById('watermarkToggle');
 
-            // Copiar URL al portapapeles
-            navigator.clipboard.writeText(imageUrl).then(() => {
-                // Mostrar mensaje de confirmación
-                const btn = event.target;
-                const originalText = btn.textContent;
-                btn.textContent = '¡URL copiada!';
-                btn.style.backgroundColor = '#27ae60';
+            btn.textContent = 'Procesando...';
+            btn.classList.add('processing');
 
-                // Restaurar botón después de 2 segundos
-                setTimeout(() => {
-                    btn.textContent = originalText;
-                    btn.style.backgroundColor = '#e67e22';
-                }, 2000);
+            // Load image via CORS proxy
+            const corsImg = new Image();
+            corsImg.crossOrigin = 'anonymous';
+            corsImg.onload = () => {
+                try {
+                    // Scale down for performance (max 2000px wide)
+                    const maxW = 2000;
+                    const scale = corsImg.naturalWidth > maxW ? maxW / corsImg.naturalWidth : 1;
+                    const w = Math.round(corsImg.naturalWidth * scale);
+                    const h = Math.round(corsImg.naturalHeight * scale);
 
-                // Abrir WatermarkRemover.io en nueva pestaña
-                window.open('https://www.watermarkremover.io/', '_blank');
-            }).catch(err => {
-                console.error('Error copiando al portapapeles:', err);
-                // Fallback: abrir directamente con la URL como parámetro
-                const watermarkUrl = `https://www.watermarkremover.io/?url=${encodeURIComponent(imageUrl)}`;
-                window.open(watermarkUrl, '_blank');
-            });
+                    canvas.width = w;
+                    canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(corsImg, 0, 0, w, h);
+
+                    const imageData = ctx.getImageData(0, 0, w, h);
+                    processWatermarkRemoval(imageData, w, h);
+                    ctx.putImageData(imageData, 0, 0);
+
+                    // Show canvas, hide original
+                    canvas.classList.add('visible');
+                    modalImage.style.display = 'none';
+                    toggle.classList.add('visible');
+
+                    btn.textContent = 'Marca removida';
+                    btn.classList.remove('processing');
+                    btn.classList.add('done');
+                } catch(e) {
+                    console.error('Watermark removal error:', e);
+                    btn.textContent = 'Error - reintentar';
+                    btn.classList.remove('processing');
+                }
+            };
+            corsImg.onerror = () => {
+                btn.textContent = 'Error de carga';
+                btn.classList.remove('processing');
+            };
+            corsImg.src = 'https://corsproxy.io/?' + encodeURIComponent(modalImage.src);
+        }
+
+        function processWatermarkRemoval(imageData, w, h) {
+            const data = imageData.data;
+            const radius = 3; // Neighborhood radius for local median
+
+            // Step 1: Detect watermark pixels
+            // The watermark is semi-transparent white/gray text overlaid on the photo
+            // It increases brightness locally in a pattern inconsistent with surrounding gradient
+            // We detect by comparing each pixel to a local average (box blur)
+
+            // Compute local averages using integral image for speed
+            const integralR = new Float64Array((w + 1) * (h + 1));
+            const integralG = new Float64Array((w + 1) * (h + 1));
+            const integralB = new Float64Array((w + 1) * (h + 1));
+
+            // Build integral images
+            for (let y = 0; y < h; y++) {
+                let rowR = 0, rowG = 0, rowB = 0;
+                for (let x = 0; x < w; x++) {
+                    const idx = (y * w + x) * 4;
+                    rowR += data[idx];
+                    rowG += data[idx + 1];
+                    rowB += data[idx + 2];
+                    const iIdx = (y + 1) * (w + 1) + (x + 1);
+                    integralR[iIdx] = rowR + integralR[y * (w + 1) + (x + 1)];
+                    integralG[iIdx] = rowG + integralG[y * (w + 1) + (x + 1)];
+                    integralB[iIdx] = rowB + integralB[y * (w + 1) + (x + 1)];
+                }
+            }
+
+            function getLocalAvg(x, y, r) {
+                const x0 = Math.max(0, x - r);
+                const y0 = Math.max(0, y - r);
+                const x1 = Math.min(w - 1, x + r);
+                const y1 = Math.min(h - 1, y + r);
+                const count = (x1 - x0 + 1) * (y1 - y0 + 1);
+                const a = (y0) * (w + 1) + (x0);
+                const b = (y0) * (w + 1) + (x1 + 1);
+                const c = (y1 + 1) * (w + 1) + (x0);
+                const d = (y1 + 1) * (w + 1) + (x1 + 1);
+                return [
+                    (integralR[d] - integralR[b] - integralR[c] + integralR[a]) / count,
+                    (integralG[d] - integralG[b] - integralG[c] + integralG[a]) / count,
+                    (integralB[d] - integralB[b] - integralB[c] + integralB[a]) / count
+                ];
+            }
+
+            // Step 2: For each pixel, detect if it's a watermark pixel and correct it
+            // Watermark adds brightness: pixel = original * (1-alpha) + wmColor * alpha
+            // We detect by checking if pixel is brighter than local avg in a specific pattern
+            const wmThreshold = 12; // Min brightness deviation to consider as watermark
+            const wmMaxDev = 80;    // Max deviation (above this it's actual image content)
+            const correctionStrength = 0.85; // How aggressively to correct
+
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const idx = (y * w + x) * 4;
+                    const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+                    const [avgR, avgG, avgB] = getLocalAvg(x, y, radius);
+
+                    // Brightness deviation from local average
+                    const devR = r - avgR;
+                    const devG = g - avgG;
+                    const devB = b - avgB;
+
+                    // Watermark detection: pixels brighter than surroundings uniformly
+                    // (watermark adds similar offset to all channels)
+                    const avgDev = (devR + devG + devB) / 3;
+                    const devSpread = Math.abs(devR - avgDev) + Math.abs(devG - avgDev) + Math.abs(devB - avgDev);
+
+                    // Watermark has uniform brightness increase (low spread) and moderate deviation
+                    if (avgDev > wmThreshold && avgDev < wmMaxDev && devSpread < avgDev * 1.5) {
+                        // This pixel is likely watermark - correct it
+                        const correction = correctionStrength * Math.min(1, (avgDev - wmThreshold) / 20);
+                        data[idx]     = Math.max(0, Math.round(r - devR * correction));
+                        data[idx + 1] = Math.max(0, Math.round(g - devG * correction));
+                        data[idx + 2] = Math.max(0, Math.round(b - devB * correction));
+                    }
+                }
+            }
         }
 
         function downloadImage(event) {
-            event.stopPropagation(); // Evitar que se cierre el modal
-            const imageUrl = document.getElementById('modalImage').src;
+            event.stopPropagation();
+            const canvas = document.getElementById('watermarkCanvas');
+            const modalImage = document.getElementById('modalImage');
+            const imageUrl = modalImage.src;
             const imageName = imageUrl.split('/').pop() || 'imagen.jpg';
 
-            // Crear un elemento 'a' temporal para descargar
             const link = document.createElement('a');
-            link.href = imageUrl;
-            link.download = imageName;
-            link.target = '_blank';
 
-            // Trigger de descarga
+            // If watermark was removed and canvas is visible, download the cleaned version
+            if (canvas.classList.contains('visible')) {
+                link.href = canvas.toDataURL('image/jpeg', 0.95);
+                link.download = imageName.replace(/\.[^.]+$/, '') + '_clean.jpg';
+            } else {
+                link.href = imageUrl;
+                link.download = imageName;
+                link.target = '_blank';
+            }
+
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
