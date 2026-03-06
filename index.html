@@ -889,7 +889,7 @@
                     },
                     body: JSON.stringify({
                         filters: {
-                            date: null, // No date filter to get all tags
+                            date: { from: "2020-01-01T00:00:00.000Z", to: "2030-12-31T23:59:59.999Z" },
                             photographer: null,
                             order: {
                                 by: "creationDate",
@@ -1023,7 +1023,10 @@
             try {
                 const requestBody = {
                     filters: {
-                        date: null,
+                        date: {
+                            from: "2020-01-01T00:00:00.000Z",
+                            to: "2030-12-31T23:59:59.999Z"
+                        },
                         photographer: null,
                         order: { by: "creationDate", order: "1" },
                         tags: [],
@@ -1046,10 +1049,14 @@
                     body: JSON.stringify(requestBody)
                 });
 
+                if (!response.ok) {
+                    throw new Error(`Error: ${response.status}`);
+                }
+
                 const data = await response.json();
                 showLoading(false);
 
-                if (!data.images || data.images.length === 0) {
+                if (!data.ok || !data.images || data.images.length === 0) {
                     gallery.innerHTML = '<div class="no-images">No se encontraron las imágenes favoritas</div>';
                     return;
                 }
