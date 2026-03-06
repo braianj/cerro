@@ -123,6 +123,100 @@
             display: block;
         }
 
+        .image-container.portrait {
+            grid-row: span 2;
+        }
+
+        .image-container.portrait img {
+            height: 100%;
+        }
+
+        /* Color palette filter */
+        .color-palette {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 8px;
+        }
+
+        .color-palette-label {
+            font-weight: bold;
+            color: #555;
+            font-size: 0.9em;
+            margin-right: 4px;
+        }
+
+        .color-swatch {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 3px solid transparent;
+            transition: all 0.2s ease;
+            position: relative;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+
+        .color-swatch:hover {
+            transform: scale(1.2);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+
+        .color-swatch.active {
+            border-color: #2c3e50;
+            transform: scale(1.15);
+            box-shadow: 0 0 0 2px white, 0 0 0 4px #2c3e50;
+        }
+
+        .color-swatch-all {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 3px solid transparent;
+            transition: all 0.2s ease;
+            background: conic-gradient(red, yellow, lime, aqua, blue, magenta, red);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+            position: relative;
+        }
+
+        .color-swatch-all:hover {
+            transform: scale(1.2);
+        }
+
+        .color-swatch-all.active {
+            border-color: #2c3e50;
+            box-shadow: 0 0 0 2px white, 0 0 0 4px #2c3e50;
+        }
+
+        .color-swatch-all::after {
+            content: '✕';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 14px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 0 0 3px rgba(0,0,0,0.8);
+        }
+
+        .color-count-badge {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            background: #2c3e50;
+            color: white;
+            font-size: 9px;
+            padding: 1px 4px;
+            border-radius: 8px;
+            min-width: 16px;
+            text-align: center;
+            pointer-events: none;
+        }
+
         .image-overlay {
             position: absolute;
             bottom: 0;
@@ -376,6 +470,15 @@
                 height: 150px;
             }
 
+            .color-palette {
+                gap: 5px;
+            }
+
+            .color-swatch, .color-swatch-all {
+                width: 24px;
+                height: 24px;
+            }
+
             .pagination {
                 flex-direction: column;
                 gap: 8px;
@@ -436,22 +539,6 @@
                 <label for="showFavorites">
                     <input type="checkbox" id="showFavorites" onchange="loadImages(1)"> Solo favoritos
                 </label>
-                <!-- Color filter hidden for now
-                <label for="colorFilter">Color dominante:</label>
-                <select id="colorFilter" onchange="filterByColor()" style="display: none;">
-                    <option value="">Todos los colores</option>
-                    <option value="rojo">🔴 Rojo</option>
-                    <option value="naranja">🟠 Naranja</option>
-                    <option value="amarillo">🟡 Amarillo</option>
-                    <option value="verde">🟢 Verde</option>
-                    <option value="cyan">🔵 Cyan</option>
-                    <option value="azul">🔵 Azul</option>
-                    <option value="morado">🟣 Morado</option>
-                    <option value="negro">⚫ Negro</option>
-                    <option value="blanco">⚪ Blanco</option>
-                    <option value="gris">🔘 Gris</option>
-                </select>
-                -->
                 <label for="perPage">Fotos por página:</label>
                 <select id="perPage" onchange="changePerPage()">
                     <option value="50">50</option>
@@ -463,6 +550,20 @@
                     <option value="5000">5000</option>
                 </select>
                 <button onclick="loadImages(1)">Filtrar</button>
+            </div>
+            <div class="color-palette" id="colorPalette">
+                <span class="color-palette-label">Color:</span>
+                <div class="color-swatch-all active" onclick="filterByColor('')" title="Todos los colores"></div>
+                <div class="color-swatch" style="background-color: #e74c3c;" onclick="filterByColor('rojo')" title="Rojo" data-color="rojo"></div>
+                <div class="color-swatch" style="background-color: #e67e22;" onclick="filterByColor('naranja')" title="Naranja" data-color="naranja"></div>
+                <div class="color-swatch" style="background-color: #f1c40f;" onclick="filterByColor('amarillo')" title="Amarillo" data-color="amarillo"></div>
+                <div class="color-swatch" style="background-color: #2ecc71;" onclick="filterByColor('verde')" title="Verde" data-color="verde"></div>
+                <div class="color-swatch" style="background-color: #1abc9c;" onclick="filterByColor('cyan')" title="Cyan" data-color="cyan"></div>
+                <div class="color-swatch" style="background-color: #3498db;" onclick="filterByColor('azul')" title="Azul" data-color="azul"></div>
+                <div class="color-swatch" style="background-color: #9b59b6;" onclick="filterByColor('morado')" title="Morado" data-color="morado"></div>
+                <div class="color-swatch" style="background-color: #1a1a1a;" onclick="filterByColor('negro')" title="Negro" data-color="negro"></div>
+                <div class="color-swatch" style="background-color: #ecf0f1;" onclick="filterByColor('blanco')" title="Blanco" data-color="blanco"></div>
+                <div class="color-swatch" style="background-color: #95a5a6;" onclick="filterByColor('gris')" title="Gris" data-color="gris"></div>
             </div>
         </header>
 
@@ -864,31 +965,117 @@
             return 'otro';
         }
 
-        // Simple color assignment for demo purposes (since CORS blocks real analysis)
-        function assignDemoColor(imageId) {
-            // Simple pattern based on image ID to simulate color analysis
-            const hash = imageId.split('').reduce((a, b) => {
-                a = ((a << 5) - a) + b.charCodeAt(0);
-                return a & a;
-            }, 0);
+        // Persistent color cache in localStorage
+        const COLOR_CACHE_KEY = 'cerro-image-colors';
+        function loadColorCache() {
+            try {
+                const cached = JSON.parse(localStorage.getItem(COLOR_CACHE_KEY) || '{}');
+                for (const [id, color] of Object.entries(cached)) {
+                    imageColors.set(id, color);
+                }
+            } catch(e) {}
+        }
+        function saveColorCache() {
+            try {
+                const obj = {};
+                imageColors.forEach((color, id) => { obj[id] = color; });
+                localStorage.setItem(COLOR_CACHE_KEY, JSON.stringify(obj));
+            } catch(e) {}
+        }
+        loadColorCache();
 
-            const colors = ['rojo', 'verde', 'azul', 'amarillo', 'naranja', 'morado', 'gris', 'negro', 'blanco'];
-            const colorIndex = Math.abs(hash) % colors.length;
-            return colors[colorIndex];
+        // Queue to limit concurrent proxy requests
+        let colorAnalysisQueue = [];
+        let activeAnalysis = 0;
+        const MAX_CONCURRENT = 4;
+
+        function processColorQueue() {
+            while (activeAnalysis < MAX_CONCURRENT && colorAnalysisQueue.length > 0) {
+                const task = colorAnalysisQueue.shift();
+                activeAnalysis++;
+                task().finally(() => {
+                    activeAnalysis--;
+                    processColorQueue();
+                });
+            }
         }
 
+        function analyzePixels(sourceImg) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const sampleSize = 50;
+            canvas.width = sampleSize;
+            canvas.height = sampleSize;
+            ctx.drawImage(sourceImg, 0, 0, sampleSize, sampleSize);
+            const imageData = ctx.getImageData(0, 0, sampleSize, sampleSize);
+            const data = imageData.data;
+
+            const colorCounts = {};
+            const step = 4;
+            for (let i = 0; i < data.length; i += 4 * step) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                const a = data[i + 3];
+                if (a < 128) continue;
+                const category = getColorCategory(r, g, b);
+                colorCounts[category] = (colorCounts[category] || 0) + 1;
+            }
+
+            let dominant = 'gris';
+            let maxCount = 0;
+            for (const [color, count] of Object.entries(colorCounts)) {
+                if (count > maxCount) {
+                    maxCount = count;
+                    dominant = color;
+                }
+            }
+            return dominant;
+        }
+
+        // Extract dominant color using CORS proxy for canvas analysis
         function extractDominantColor(img, imageId) {
             return new Promise((resolve) => {
-                console.log('Analyzing color for:', imageId);
+                // Check memory cache
+                if (imageColors.has(imageId)) {
+                    resolve(imageColors.get(imageId));
+                    return;
+                }
 
-                // For demo purposes, assign a consistent color based on image ID
-                const demoColor = assignDemoColor(imageId);
-                console.log(`Demo color assigned for ${imageId}: ${demoColor}`);
+                const storeResult = (color) => {
+                    imageColors.set(imageId, color);
+                    saveColorCache();
+                    resolve(color);
+                };
 
-                imageColors.set(imageId, demoColor);
-                resolve(demoColor);
+                // Queue the analysis to limit concurrent requests
+                const task = () => new Promise((taskDone) => {
+                    const corsImg = new Image();
+                    corsImg.crossOrigin = 'anonymous';
+                    corsImg.onload = () => {
+                        try {
+                            const dominant = analyzePixels(corsImg);
+                            storeResult(dominant);
+                        } catch(e) {
+                            storeResult('gris'); // Fallback if canvas fails
+                        }
+                        taskDone();
+                    };
+                    corsImg.onerror = () => {
+                        storeResult('gris');
+                        taskDone();
+                    };
+                    // Use CORS proxy for S3 images
+                    const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(img.src);
+                    corsImg.src = proxyUrl;
+                });
+
+                colorAnalysisQueue.push(task);
+                processColorQueue();
             });
         }
+
+        let selectedColorFilter = ''; // Currently active color filter
 
         async function fetchImages(page = 1) {
             const dateFrom = document.getElementById('dateFrom').value + 'T00:00:00.000Z';
@@ -996,104 +1183,91 @@
             }
         }
 
-        async function filterByColor() {
-            const selectedColor = document.getElementById('colorFilter').value;
+        async function filterByColor(color) {
+            selectedColorFilter = color;
+
+            // Update swatch active states
+            document.querySelectorAll('.color-swatch, .color-swatch-all').forEach(s => s.classList.remove('active'));
+            if (!color) {
+                document.querySelector('.color-swatch-all').classList.add('active');
+            } else {
+                const activeSwatch = document.querySelector(`.color-swatch[data-color="${color}"]`);
+                if (activeSwatch) activeSwatch.classList.add('active');
+            }
+
             const gallery = document.getElementById('gallery');
             const allContainers = gallery.querySelectorAll('.image-container');
 
-            console.log('=== COLOR FILTER DEBUG ===');
-            console.log('Selected color:', selectedColor);
-            console.log('Found containers:', allContainers.length);
-
-            // Remove any existing no-results message first
+            // Remove any existing no-results message
             const existingNoResults = gallery.querySelector('.no-color-results');
             if (existingNoResults) existingNoResults.remove();
 
-            if (!selectedColor) {
+            if (!color) {
                 // Show all images
                 allContainers.forEach(container => {
-                    container.style.display = 'block';
+                    container.style.display = '';
                 });
-                console.log('No color selected, showing all images');
                 return;
             }
 
-            // Show loading indicator
-            const loadingIndicator = document.createElement('div');
-            loadingIndicator.id = 'color-loading';
-            loadingIndicator.innerHTML = '🎨 Analizando colores...';
-            loadingIndicator.style.cssText = `
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                background: rgba(0,0,0,0.8);
-                color: white;
-                padding: 20px;
-                border-radius: 10px;
-                z-index: 1000;
-                font-size: 16px;
-            `;
-            document.body.appendChild(loadingIndicator);
-
+            // Analyze colors if needed, then filter
             let visibleCount = 0;
+            const promises = [];
 
-            // Process each image container
-            for (let i = 0; i < allContainers.length; i++) {
-                const container = allContainers[i];
+            allContainers.forEach(container => {
                 const img = container.querySelector('img');
                 const imageId = container.dataset.imageId;
-
-                console.log(`Processing container ${i + 1}/${allContainers.length}, imageId:`, imageId);
-
                 if (!imageId) {
-                    console.log('No imageId found, skipping');
                     container.style.display = 'none';
-                    continue;
+                    return;
                 }
 
-                // Get or analyze color
-                let dominantColor = imageColors.get(imageId);
+                const promise = extractDominantColor(img, imageId).then(dominantColor => {
+                    if (dominantColor === color) {
+                        container.style.display = '';
+                        visibleCount++;
+                    } else {
+                        container.style.display = 'none';
+                    }
+                });
+                promises.push(promise);
+            });
 
-                if (!dominantColor) {
-                    console.log('Color not cached, analyzing...');
-                    dominantColor = await extractDominantColor(img, imageId);
-                } else {
-                    console.log('Using cached color:', dominantColor);
-                }
+            await Promise.all(promises);
 
-                console.log(`Image ${imageId} -> ${dominantColor}, selected: ${selectedColor}, match: ${dominantColor === selectedColor}`);
+            // Update swatch counts
+            updateColorCounts();
 
-                // Show/hide based on color match
-                if (dominantColor === selectedColor) {
-                    container.style.display = 'block';
-                    visibleCount++;
-                } else {
-                    container.style.display = 'none';
-                }
-            }
-
-            // Remove loading indicator
-            const loading = document.getElementById('color-loading');
-            if (loading) document.body.removeChild(loading);
-
-            console.log(`Color filtering complete. Visible: ${visibleCount}/${allContainers.length}`);
-
-            // Show message if no images match
             if (visibleCount === 0) {
                 const noResults = document.createElement('div');
                 noResults.className = 'no-color-results';
-                noResults.innerHTML = `No se encontraron imágenes con color dominante: ${selectedColor}`;
-                noResults.style.cssText = `
-                    text-align: center;
-                    padding: 40px;
-                    color: #666;
-                    font-size: 16px;
-                    grid-column: 1 / -1;
-                `;
+                noResults.innerHTML = `No se encontraron imágenes con color dominante: ${color}`;
+                noResults.style.cssText = 'text-align:center;padding:40px;color:#666;font-size:16px;grid-column:1/-1;';
                 gallery.appendChild(noResults);
-                console.log('Added no results message');
             }
+        }
+
+        function updateColorCounts() {
+            const counts = {};
+            imageColors.forEach((color) => {
+                counts[color] = (counts[color] || 0) + 1;
+            });
+
+            document.querySelectorAll('.color-swatch').forEach(swatch => {
+                const color = swatch.dataset.color;
+                const count = counts[color] || 0;
+
+                // Remove existing badge
+                const existing = swatch.querySelector('.color-count-badge');
+                if (existing) existing.remove();
+
+                if (count > 0) {
+                    const badge = document.createElement('span');
+                    badge.className = 'color-count-badge';
+                    badge.textContent = count;
+                    swatch.appendChild(badge);
+                }
+            });
         }
 
         function displayImages(images) {
@@ -1110,11 +1284,36 @@
                 imageContainer.className = 'image-container';
                 imageContainer.dataset.imageId = image._id;
 
+                // Detect orientation from EXIF data
+                const exif = image.exifData;
+                if (exif && exif.Dimensions) {
+                    const w = exif.Dimensions.width;
+                    const h = exif.Dimensions.height;
+                    if (h > w) {
+                        imageContainer.classList.add('portrait');
+                    }
+                }
+
                 const img = document.createElement('img');
                 img.src = image.copyFileName;
                 img.alt = `Imagen ${index + 1}`;
                 img.loading = 'lazy';
                 img.onclick = () => openModal(image);
+
+                // Fallback orientation detection from natural dimensions
+                img.onload = function() {
+                    if (!exif || !exif.Dimensions) {
+                        if (this.naturalHeight > this.naturalWidth) {
+                            imageContainer.classList.add('portrait');
+                        }
+                    }
+                    // Pre-analyze color in background
+                    if (!imageColors.has(image._id)) {
+                        extractDominantColor(this, image._id).then(() => {
+                            updateColorCounts();
+                        });
+                    }
+                };
 
                 // Favorite button
                 const favoriteBtn = document.createElement('div');
@@ -1141,21 +1340,12 @@
                 imageContainer.appendChild(favoriteBtn);
                 imageContainer.appendChild(imageInfo);
                 gallery.appendChild(imageContainer);
-
-                // Color analysis disabled for now
-                /*
-                setTimeout(() => {
-                    if (!imageColors.has(image._id)) {
-                        extractDominantColor(img, image._id).then(() => {
-                            console.log(`Pre-analyzed color for ${image._id}:`, imageColors.get(image._id));
-                        });
-                    }
-                }, 100);
-                */
             });
 
-            // Reset color filter when new images are loaded (disabled for now)
-            // document.getElementById('colorFilter').value = '';
+            // Reset color filter
+            selectedColorFilter = '';
+            document.querySelectorAll('.color-swatch, .color-swatch-all').forEach(s => s.classList.remove('active'));
+            document.querySelector('.color-swatch-all').classList.add('active');
         }
 
         function openModal(image) {
