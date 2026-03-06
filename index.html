@@ -363,6 +363,34 @@
             animation: fadeIn 0.3s;
         }
 
+        .modal-nav {
+            position: fixed;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            border: none;
+            font-size: 40px;
+            padding: 15px 12px;
+            cursor: pointer;
+            z-index: 1002;
+            border-radius: 4px;
+            transition: background 0.2s;
+            line-height: 1;
+        }
+
+        .modal-nav:hover {
+            background: rgba(255, 255, 255, 0.35);
+        }
+
+        .modal-nav-prev {
+            left: 15px;
+        }
+
+        .modal-nav-next {
+            right: 15px;
+        }
+
         .modal-content {
             position: relative;
             margin: auto;
@@ -533,6 +561,19 @@
                 padding: 10px;
             }
 
+            .modal-nav {
+                font-size: 28px;
+                padding: 10px 8px;
+            }
+
+            .modal-nav-prev {
+                left: 5px;
+            }
+
+            .modal-nav-next {
+                right: 5px;
+            }
+
             .image-info {
                 padding: 8px;
                 font-size: 0.85em;
@@ -631,7 +672,9 @@
     </div>
 
     <div class="modal" id="modal" onclick="closeModal()">
-        <div class="modal-content">
+        <button class="modal-nav modal-nav-prev" id="modalPrev" onclick="navigateModal(-1, event)">&#10094;</button>
+        <button class="modal-nav modal-nav-next" id="modalNext" onclick="navigateModal(1, event)">&#10095;</button>
+        <div class="modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <button class="watermark-link-btn" id="watermarkLinkBtn" onclick="openWatermarkRemover(event)">Remover
                     marca de agua</button>
@@ -654,6 +697,7 @@
         let imageColors = new Map(); // Cache: imageId -> array of color strings
         let tagsLoaded = false; // Flag to prevent reloading tags
         let currentTab = 'gallery'; // 'gallery' or 'favorites'
+        let currentModalIndex = -1; // Index of current image in modal
         let tabSwitchVersion = 0; // Race condition guard
         let favoriteImageCache = JSON.parse(localStorage.getItem('cerro-favorites-cache') || '{}'); // Cache full image objects
 
@@ -1554,6 +1598,13 @@
             const modalImage = document.getElementById('modalImage');
             const imageInfo = document.getElementById('imageInfo');
 
+            // Track index for navigation
+            currentModalIndex = currentImages.findIndex(i => i._id === image._id);
+
+            // Show/hide nav buttons
+            document.getElementById('modalPrev').style.display = currentModalIndex > 0 ? '' : 'none';
+            document.getElementById('modalNext').style.display = currentModalIndex < currentImages.length - 1 ? '' : 'none';
+
             modalImage.src = image.copyFileName;
 
             const date = new Date(image.creationDate).toLocaleDateString('es-ES');
@@ -1579,7 +1630,38 @@
 
         function closeModal() {
             document.getElementById('modal').style.display = 'none';
+            currentModalIndex = -1;
         }
+
+        function navigateModal(direction, event) {
+            if (event) event.stopPropagation();
+            const newIndex = currentModalIndex + direction;
+            if (newIndex >= 0 && newIndex < currentImages.length) {
+                openModal(currentImages[newIndex]);
+            }
+        }
+
+        // Swipe support for modal
+        (function() {
+            let touchStartX = 0;
+            let touchStartY = 0;
+            const modal = document.getElementById('modal');
+
+            modal.addEventListener('touchstart', function(e) {
+                touchStartX = e.changedTouches[0].screenX;
+                touchStartY = e.changedTouches[0].screenY;
+            }, { passive: true });
+
+            modal.addEventListener('touchend', function(e) {
+                const dx = e.changedTouches[0].screenX - touchStartX;
+                const dy = e.changedTouches[0].screenY - touchStartY;
+                // Only trigger if horizontal swipe is dominant and > 50px
+                if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+                    if (dx > 0) navigateModal(-1); // swipe right = previous
+                    else navigateModal(1); // swipe left = next
+                }
+            }, { passive: true });
+        })();
 
         function openWatermarkRemover(event) {
             event.stopPropagation();
@@ -1750,10 +1832,17 @@
             }
         });
 
-        // Cerrar modal con Escape
+        // Keyboard navigation for modal
         document.addEventListener('keydown', function (e) {
+            const modal = document.getElementById('modal');
+            if (modal.style.display !== 'block') return;
+
             if (e.key === 'Escape') {
                 closeModal();
+            } else if (e.key === 'ArrowLeft') {
+                navigateModal(-1);
+            } else if (e.key === 'ArrowRight') {
+                navigateModal(1);
             }
         });
     </script>
