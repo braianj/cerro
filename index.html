@@ -654,6 +654,8 @@
         let imageColors = new Map(); // Cache: imageId -> array of color strings
         let tagsLoaded = false; // Flag to prevent reloading tags
         let currentTab = 'gallery'; // 'gallery' or 'favorites'
+        let tabSwitchVersion = 0; // Race condition guard
+        let favoriteImageCache = JSON.parse(localStorage.getItem('cerro-favorites-cache') || '{}'); // Cache full image objects
 
         // URL Parameters functionality
         function getUrlParams() {
@@ -944,11 +946,16 @@
             const index = favorites.indexOf(imageId);
             if (index > -1) {
                 favorites.splice(index, 1);
+                delete favoriteImageCache[imageId];
             } else {
                 favorites.push(imageId);
+                // Cache the image object for instant favorites loading
+                const img = currentImages.find(i => i._id === imageId);
+                if (img) favoriteImageCache[imageId] = img;
             }
 
             localStorage.setItem('cerro-favorites', JSON.stringify(favorites));
+            localStorage.setItem('cerro-favorites-cache', JSON.stringify(favoriteImageCache));
 
             // Update the heart icon
             const heartIcon = event.target;
@@ -984,6 +991,7 @@
 
         function switchTab(tab, skipLoad) {
             currentTab = tab;
+            tabSwitchVersion++; // Invalidate any pending async responses
             document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.view-tab')[tab === 'gallery' ? 0 : 1].classList.add('active');
 
@@ -1016,6 +1024,7 @@
 
         async function loadFavorites() {
             const gallery = document.getElementById('gallery');
+            const myVersion = tabSwitchVersion;
 
             if (favorites.length === 0) {
                 gallery.innerHTML = '<div class="no-images">No tenés imágenes marcadas como favoritas. Hacé click en el corazón de cualquier foto para agregarla.</div>';
@@ -1023,6 +1032,20 @@
                 return;
             }
 
+            // Try to load from cache first (instant)
+            const cachedImages = favorites
+                .map(id => favoriteImageCache[id])
+                .filter(Boolean);
+
+            if (cachedImages.length === favorites.length) {
+                // All favorites are cached, display instantly
+                showLoading(false);
+                currentImages = cachedImages;
+                displayImages(cachedImages);
+                return;
+            }
+
+            // Fallback: fetch missing ones from API
             showLoading(true);
             gallery.innerHTML = '';
 
@@ -1055,11 +1078,18 @@
                     body: JSON.stringify(requestBody)
                 });
 
+                // Race condition guard: if user switched tabs while waiting, discard
+                if (myVersion !== tabSwitchVersion) return;
+
                 if (!response.ok) {
                     throw new Error(`Error: ${response.status}`);
                 }
 
                 const data = await response.json();
+
+                // Race condition guard again after json parse
+                if (myVersion !== tabSwitchVersion) return;
+
                 showLoading(false);
 
                 if (!data.ok || !data.images || data.images.length === 0) {
@@ -1067,9 +1097,14 @@
                     return;
                 }
 
+                // Update cache with fetched images
+                data.images.forEach(img => { favoriteImageCache[img._id] = img; });
+                localStorage.setItem('cerro-favorites-cache', JSON.stringify(favoriteImageCache));
+
                 currentImages = data.images;
                 displayImages(data.images);
             } catch (error) {
+                if (myVersion !== tabSwitchVersion) return;
                 console.error('Error loading favorites:', error);
                 showLoading(false);
                 gallery.innerHTML = '<div class="no-images">Error al cargar favoritos</div>';
@@ -1260,6 +1295,7 @@
         let selectedColorFilter = ''; // Currently active color filter
 
         async function fetchImages(page = 1) {
+            const myVersion = tabSwitchVersion;
             const dateFrom = document.getElementById('dateFrom').value + 'T00:00:00.000Z';
             const dateTo = document.getElementById('dateTo').value + 'T23:59:59.999Z';
             const selectedPhotographer = document.getElementById('photographer').value;
@@ -1310,6 +1346,9 @@
                 }
 
                 const data = await response.json();
+
+                // Race condition guard: discard if user switched tabs
+                if (myVersion !== tabSwitchVersion) return;
 
                 console.log('API Response:', {
                     ok: data.ok,
