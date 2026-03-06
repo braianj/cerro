@@ -992,6 +992,12 @@
             const pagTop = document.getElementById('paginationTop');
             const pagBot = document.getElementById('pagination');
 
+            // Clear gallery immediately to avoid showing stale content
+            if (!skipLoad) {
+                document.getElementById('gallery').innerHTML = '';
+                showLoading(true);
+            }
+
             if (tab === 'favorites') {
                 filters.style.display = 'none';
                 colorPalette.style.display = 'none';
@@ -1461,8 +1467,8 @@
                             imageContainer.classList.add('portrait');
                         }
                     }
-                    // Pre-analyze color in background
-                    if (!imageColors.has(image._id)) {
+                    // Pre-analyze color in background (skip on favorites tab)
+                    if (currentTab !== 'favorites' && !imageColors.has(image._id)) {
                         extractDominantColor(this, image._id).then(() => {
                             updateColorCounts();
                         });
@@ -1496,10 +1502,12 @@
                 gallery.appendChild(imageContainer);
             });
 
-            // Reset color filter
-            selectedColorFilter = '';
-            document.querySelectorAll('.color-swatch, .color-swatch-all').forEach(s => s.classList.remove('active'));
-            document.querySelector('.color-swatch-all').classList.add('active');
+            // Reset color filter (only on gallery tab)
+            if (currentTab !== 'favorites') {
+                selectedColorFilter = '';
+                document.querySelectorAll('.color-swatch, .color-swatch-all').forEach(s => s.classList.remove('active'));
+                document.querySelector('.color-swatch-all')?.classList.add('active');
+            }
         }
 
         function openModal(image) {
