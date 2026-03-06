@@ -1480,8 +1480,8 @@
             corsImg.crossOrigin = 'anonymous';
             corsImg.onload = () => {
                 try {
-                    // Scale down for performance (max 2000px wide)
-                    const maxW = 2000;
+                    // Scale down for performance (max 1200px wide)
+                    const maxW = 1200;
                     const scale = corsImg.naturalWidth > maxW ? maxW / corsImg.naturalWidth : 1;
                     const w = Math.round(corsImg.naturalWidth * scale);
                     const h = Math.round(corsImg.naturalHeight * scale);
@@ -1518,80 +1518,121 @@
 
         function processWatermarkRemoval(imageData, w, h) {
             const data = imageData.data;
-            const radius = 3; // Neighborhood radius for local median
+            const R = 35; // Large radius so window extends well beyond watermark elements
+            const stride = w + 1;
 
-            // Step 1: Detect watermark pixels
-            // The watermark is semi-transparent white/gray text overlaid on the photo
-            // It increases brightness locally in a pattern inconsistent with surrounding gradient
-            // We detect by comparing each pixel to a local average (box blur)
+            // === INTEGRAL IMAGES (for fast box-average) ===
+            const integralR = new Float64Array(stride * (h + 1));
+            const integralG = new Float64Array(stride * (h + 1));
+            const integralB = new Float64Array(stride * (h + 1));
 
-            // Compute local averages using integral image for speed
-            const integralR = new Float64Array((w + 1) * (h + 1));
-            const integralG = new Float64Array((w + 1) * (h + 1));
-            const integralB = new Float64Array((w + 1) * (h + 1));
-
-            // Build integral images
             for (let y = 0; y < h; y++) {
                 let rowR = 0, rowG = 0, rowB = 0;
                 for (let x = 0; x < w; x++) {
                     const idx = (y * w + x) * 4;
-                    rowR += data[idx];
-                    rowG += data[idx + 1];
-                    rowB += data[idx + 2];
-                    const iIdx = (y + 1) * (w + 1) + (x + 1);
-                    integralR[iIdx] = rowR + integralR[y * (w + 1) + (x + 1)];
-                    integralG[iIdx] = rowG + integralG[y * (w + 1) + (x + 1)];
-                    integralB[iIdx] = rowB + integralB[y * (w + 1) + (x + 1)];
+                    rowR += data[idx]; rowG += data[idx + 1]; rowB += data[idx + 2];
+                    const iIdx = (y + 1) * stride + (x + 1);
+                    const above = y * stride + (x + 1);
+                    integralR[iIdx] = rowR + integralR[above];
+                    integralG[iIdx] = rowG + integralG[above];
+                    integralB[iIdx] = rowB + integralB[above];
                 }
             }
 
-            function getLocalAvg(x, y, r) {
-                const x0 = Math.max(0, x - r);
-                const y0 = Math.max(0, y - r);
-                const x1 = Math.min(w - 1, x + r);
-                const y1 = Math.min(h - 1, y + r);
+            function getAvg(integ, x, y, r) {
+                const x0 = Math.max(0, x - r), y0 = Math.max(0, y - r);
+                const x1 = Math.min(w - 1, x + r), y1 = Math.min(h - 1, y + r);
                 const count = (x1 - x0 + 1) * (y1 - y0 + 1);
-                const a = (y0) * (w + 1) + (x0);
-                const b = (y0) * (w + 1) + (x1 + 1);
-                const c = (y1 + 1) * (w + 1) + (x0);
-                const d = (y1 + 1) * (w + 1) + (x1 + 1);
-                return [
-                    (integralR[d] - integralR[b] - integralR[c] + integralR[a]) / count,
-                    (integralG[d] - integralG[b] - integralG[c] + integralG[a]) / count,
-                    (integralB[d] - integralB[b] - integralB[c] + integralB[a]) / count
-                ];
+                const d = (y1 + 1) * stride + (x1 + 1);
+                const b = y0 * stride + (x1 + 1);
+                const c = (y1 + 1) * stride + x0;
+                const a = y0 * stride + x0;
+                return (integ[d] - integ[b] - integ[c] + integ[a]) / count;
             }
 
-            // Step 2: For each pixel, detect if it's a watermark pixel and correct it
-            // Watermark adds brightness: pixel = original * (1-alpha) + wmColor * alpha
-            // We detect by checking if pixel is brighter than local avg in a specific pattern
-            const wmThreshold = 12; // Min brightness deviation to consider as watermark
-            const wmMaxDev = 80;    // Max deviation (above this it's actual image content)
-            const correctionStrength = 0.85; // How aggressively to correct
+            // === PASS 1: Detect candidate watermark pixels ===
+            // Watermark is semi-transparent gray overlay (~25-35% opacity, gray ~140-160)
+            // Creates moderate, uniform brightness shift (15-40 units).
+            // Real edges (skier vs snow) create LARGE deviations (80+) — must be excluded.
+            const isWM = new Uint8Array(w * h);
+            const minDev = 7;   // Minimum deviation to consider
+            const maxDev = 55;  // Maximum — above this it's a real edge, not watermark
 
             for (let y = 0; y < h; y++) {
                 for (let x = 0; x < w; x++) {
                     const idx = (y * w + x) * 4;
                     const r = data[idx], g = data[idx + 1], b = data[idx + 2];
-                    const [avgR, avgG, avgB] = getLocalAvg(x, y, radius);
+                    const aR = getAvg(integralR, x, y, R);
+                    const aG = getAvg(integralG, x, y, R);
+                    const aB = getAvg(integralB, x, y, R);
 
-                    // Brightness deviation from local average
-                    const devR = r - avgR;
-                    const devG = g - avgG;
-                    const devB = b - avgB;
-
-                    // Watermark detection: pixels brighter than surroundings uniformly
-                    // (watermark adds similar offset to all channels)
+                    const devR = r - aR, devG = g - aG, devB = b - aB;
                     const avgDev = (devR + devG + devB) / 3;
-                    const devSpread = Math.abs(devR - avgDev) + Math.abs(devG - avgDev) + Math.abs(devB - avgDev);
+                    const absAvg = Math.abs(avgDev);
 
-                    // Watermark has uniform brightness increase (low spread) and moderate deviation
-                    if (avgDev > wmThreshold && avgDev < wmMaxDev && devSpread < avgDev * 1.5) {
-                        // This pixel is likely watermark - correct it
-                        const correction = correctionStrength * Math.min(1, (avgDev - wmThreshold) / 20);
-                        data[idx]     = Math.max(0, Math.round(r - devR * correction));
-                        data[idx + 1] = Math.max(0, Math.round(g - devG * correction));
-                        data[idx + 2] = Math.max(0, Math.round(b - devB * correction));
+                    // Uniform channel shift (watermark is gray, affects R≈G≈B similarly)
+                    const spread = Math.abs(devR - avgDev) + Math.abs(devG - avgDev) + Math.abs(devB - avgDev);
+
+                    // Must be moderate deviation (not too small, not too large) with uniform channels
+                    if (absAvg > minDev && absAvg < maxDev && spread < absAvg * 1.8) {
+                        isWM[y * w + x] = 1;
+                    }
+                }
+            }
+
+            // === PASS 2: Build clean-pixel-only integral images ===
+            const cleanR = new Float64Array(stride * (h + 1));
+            const cleanG = new Float64Array(stride * (h + 1));
+            const cleanB = new Float64Array(stride * (h + 1));
+            const cleanC = new Float64Array(stride * (h + 1));
+
+            for (let y = 0; y < h; y++) {
+                let rowR = 0, rowG = 0, rowB = 0, rowN = 0;
+                for (let x = 0; x < w; x++) {
+                    if (!isWM[y * w + x]) {
+                        const idx = (y * w + x) * 4;
+                        rowR += data[idx]; rowG += data[idx + 1]; rowB += data[idx + 2];
+                        rowN += 1;
+                    }
+                    const iIdx = (y + 1) * stride + (x + 1);
+                    const above = y * stride + (x + 1);
+                    cleanR[iIdx] = rowR + cleanR[above];
+                    cleanG[iIdx] = rowG + cleanG[above];
+                    cleanB[iIdx] = rowB + cleanB[above];
+                    cleanC[iIdx] = rowN + cleanC[above];
+                }
+            }
+
+            function getCleanAvg(x, y, r) {
+                const x0 = Math.max(0, x - r), y0 = Math.max(0, y - r);
+                const x1 = Math.min(w - 1, x + r), y1 = Math.min(h - 1, y + r);
+                const d = (y1 + 1) * stride + (x1 + 1);
+                const b = y0 * stride + (x1 + 1);
+                const c = (y1 + 1) * stride + x0;
+                const a = y0 * stride + x0;
+                const n = cleanC[d] - cleanC[b] - cleanC[c] + cleanC[a];
+                if (n < 5) return null;
+                return [
+                    (cleanR[d] - cleanR[b] - cleanR[c] + cleanR[a]) / n,
+                    (cleanG[d] - cleanG[b] - cleanG[c] + cleanG[a]) / n,
+                    (cleanB[d] - cleanB[b] - cleanB[c] + cleanB[a]) / n
+                ];
+            }
+
+            // === PASS 3: Correct watermark pixels toward clean local average ===
+            // Cap correction so we never shift more than the watermark could have added
+            const strength = 0.80;
+            const maxCorrection = 40; // Max per-channel shift in pixels
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    if (!isWM[y * w + x]) continue;
+                    const avg = getCleanAvg(x, y, R);
+                    if (!avg) continue;
+                    const idx = (y * w + x) * 4;
+                    for (let c = 0; c < 3; c++) {
+                        const diff = (avg[c] - data[idx + c]) * strength;
+                        const capped = Math.sign(diff) * Math.min(Math.abs(diff), maxCorrection);
+                        data[idx + c] = Math.max(0, Math.min(255, Math.round(data[idx + c] + capped)));
                     }
                 }
             }
