@@ -628,17 +628,17 @@
                 <label for="perPage">Fotos por página:</label>
                 <select id="perPage" onchange="changePerPage()">
                     <option value="50">50</option>
-                    <option value="100">100</option>
+                    <option value="100" selected>100</option>
                     <option value="200">200</option>
                     <option value="500">500</option>
-                    <option value="1000" selected>1000</option>
+                    <option value="1000">1000</option>
                     <option value="2000">2000</option>
                     <option value="5000">5000</option>
                 </select>
                 <button onclick="loadImages(1)">Filtrar</button>
             </div>
             <div class="color-palette" id="colorPalette">
-                <span class="color-palette-label">Color:</span>
+                <span class="color-palette-label" title="Analiza los colores de las fotos de esta página. Para leer los píxeles, las URLs de las imágenes pasan por corsproxy.io, un servicio externo.">Color:</span>
                 <div class="color-swatch-all active" onclick="filterByColor('')" title="Todos los colores"></div>
                 <div class="color-swatch" style="background-color: #e74c3c;" onclick="filterByColor('rojo')" title="Rojo" data-color="rojo"></div>
                 <div class="color-swatch" style="background-color: #e67e22;" onclick="filterByColor('naranja')" title="Naranja" data-color="naranja"></div>
@@ -689,7 +689,8 @@
     <script>
         let currentPage = 1;
         let totalPages = 1;
-        let perPage = 1000;
+        const DEFAULT_PER_PAGE = 100;
+        let perPage = DEFAULT_PER_PAGE;
         let currentImages = [];
         let photographers = [];
         let availableTags = [];
@@ -701,12 +702,35 @@
         let tabSwitchVersion = 0; // Race condition guard
         let favoriteImageCache = JSON.parse(localStorage.getItem('cerro-favorites-cache') || '{}'); // Cache full image objects
 
+        // api1.foti.ar es un servidor de terceros: toda respuesta suya es dato no confiable.
+        // Cualquier valor de la API que termine en innerHTML pasa por acá.
+        function escapeHtml(value) {
+            if (value === null || value === undefined) return '';
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // localStorage puede fallar por cuota llena o modo privado. Nunca debe romper el flujo.
+        function safeSetItem(key, value) {
+            try {
+                localStorage.setItem(key, value);
+                return true;
+            } catch (e) {
+                console.warn(`No se pudo guardar "${key}" en localStorage:`, e.name);
+                return false;
+            }
+        }
+
         // URL Parameters functionality
         function getUrlParams() {
             const urlParams = new URLSearchParams(window.location.search);
             return {
                 page: parseInt(urlParams.get('page')) || 1,
-                perPage: parseInt(urlParams.get('perPage')) || 1000,
+                perPage: parseInt(urlParams.get('perPage')) || DEFAULT_PER_PAGE,
                 dateFrom: urlParams.get('dateFrom') || '',
                 dateTo: urlParams.get('dateTo') || '',
                 photographer: urlParams.get('photographer') || '',
@@ -744,7 +768,7 @@
 
             // Add current filter values
             if (currentPage > 1) urlParams.set('page', currentPage);
-            if (perPage !== 1000) urlParams.set('perPage', perPage);
+            if (perPage !== DEFAULT_PER_PAGE) urlParams.set('perPage', perPage);
 
             const dateFrom = document.getElementById('dateFrom').value;
             const dateTo = document.getElementById('dateTo').value;
@@ -998,8 +1022,8 @@
                 if (img) favoriteImageCache[imageId] = img;
             }
 
-            localStorage.setItem('cerro-favorites', JSON.stringify(favorites));
-            localStorage.setItem('cerro-favorites-cache', JSON.stringify(favoriteImageCache));
+            safeSetItem('cerro-favorites', JSON.stringify(favorites));
+            safeSetItem('cerro-favorites-cache', JSON.stringify(favoriteImageCache));
 
             // Update the heart icon
             const heartIcon = event.target;
@@ -1143,7 +1167,7 @@
 
                 // Update cache with fetched images
                 data.images.forEach(img => { favoriteImageCache[img._id] = img; });
-                localStorage.setItem('cerro-favorites-cache', JSON.stringify(favoriteImageCache));
+                safeSetItem('cerro-favorites-cache', JSON.stringify(favoriteImageCache));
 
                 currentImages = data.images;
                 displayImages(data.images);
@@ -1222,11 +1246,9 @@
             } catch(e) { localStorage.removeItem(COLOR_CACHE_KEY); }
         }
         function saveColorCache() {
-            try {
-                const obj = { _version: COLOR_CACHE_VERSION };
-                imageColors.forEach((colors, id) => { obj[id] = colors; });
-                localStorage.setItem(COLOR_CACHE_KEY, JSON.stringify(obj));
-            } catch(e) {}
+            const obj = { _version: COLOR_CACHE_VERSION };
+            imageColors.forEach((colors, id) => { obj[id] = colors; });
+            safeSetItem(COLOR_CACHE_KEY, JSON.stringify(obj));
         }
         loadColorCache();
 
@@ -1329,11 +1351,6 @@
                 colorAnalysisQueue.push(task);
                 processColorQueue();
             });
-        }
-
-        // Keep backward compat alias
-        function extractDominantColor(img, imageId) {
-            return extractImageColors(img, imageId);
         }
 
         let selectedColorFilter = ''; // Currently active color filter
@@ -1482,7 +1499,7 @@
             if (visibleCount === 0) {
                 const noResults = document.createElement('div');
                 noResults.className = 'no-color-results';
-                noResults.innerHTML = `No se encontraron imágenes que contengan color: ${color}`;
+                noResults.textContent = `No se encontraron imágenes que contengan color: ${color}`;
                 noResults.style.cssText = 'text-align:center;padding:40px;color:#666;font-size:16px;grid-column:1/-1;';
                 gallery.appendChild(noResults);
             }
@@ -1550,12 +1567,10 @@
                             imageContainer.classList.add('portrait');
                         }
                     }
-                    // Pre-analyze color in background (skip on favorites tab)
-                    if (currentTab !== 'favorites' && !imageColors.has(image._id)) {
-                        extractDominantColor(this, image._id).then(() => {
-                            updateColorCounts();
-                        });
-                    }
+                    // Sin análisis de color acá: pasa cada URL por corsproxy.io (tercero) y
+                    // antes corría eager sobre toda la página. Ahora solo lo dispara
+                    // filterByColor(), cuando el usuario elige un color. Los contadores se
+                    // pintan una vez al final de displayImages() con lo que ya esté cacheado.
                 };
 
                 // Favorite button
@@ -1568,14 +1583,14 @@
                 imageInfo.className = 'image-overlay';
 
                 const date = new Date(image.creationDate).toLocaleDateString('es-ES');
-                const photographer = image.photographerData.name;
+                const photographer = image.photographerData?.name || 'Sin fotógrafo';
                 const tags = image.tags.length > 0 ? image.tags.join(', ') : 'Sin etiquetas';
 
                 imageInfo.innerHTML = `
                     <div class="image-details">
-                        <div><strong>Fecha:</strong> ${date}</div>
-                        <div><strong>Fotógrafo:</strong> ${photographer}</div>
-                        <div><strong>Etiquetas:</strong> ${tags}</div>
+                        <div><strong>Fecha:</strong> ${escapeHtml(date)}</div>
+                        <div><strong>Fotógrafo:</strong> ${escapeHtml(photographer)}</div>
+                        <div><strong>Etiquetas:</strong> ${escapeHtml(tags)}</div>
                     </div>
                 `;
 
@@ -1590,6 +1605,7 @@
                 selectedColorFilter = '';
                 document.querySelectorAll('.color-swatch, .color-swatch-all').forEach(s => s.classList.remove('active'));
                 document.querySelector('.color-swatch-all')?.classList.add('active');
+                updateColorCounts();
             }
         }
 
@@ -1612,16 +1628,16 @@
 
             imageInfo.innerHTML = `
                 <h3>Detalles de la imagen</h3>
-                <div><strong>Fecha de creación:</strong> ${date}</div>
-                <div><strong>Fotógrafo:</strong> ${image.photographerData.name}</div>
-                <div><strong>Etiquetas:</strong> ${image.tags.join(', ') || 'Sin etiquetas'}</div>
+                <div><strong>Fecha de creación:</strong> ${escapeHtml(date)}</div>
+                <div><strong>Fotógrafo:</strong> ${escapeHtml(image.photographerData?.name)}</div>
+                <div><strong>Etiquetas:</strong> ${escapeHtml(image.tags.join(', ') || 'Sin etiquetas')}</div>
                 ${exif ? `
-                    <div><strong>Cámara:</strong> ${exif.Make?.replace(/"/g, '')} ${exif.Model?.replace(/"/g, '')}</div>
-                    <div><strong>Dimensiones:</strong> ${exif.Dimensions?.width} x ${exif.Dimensions?.height}</div>
-                    <div><strong>ISO:</strong> ${exif.ISO}</div>
-                    <div><strong>Apertura:</strong> f/${exif.FNumber}</div>
+                    <div><strong>Cámara:</strong> ${escapeHtml(exif.Make?.replace(/"/g, ''))} ${escapeHtml(exif.Model?.replace(/"/g, ''))}</div>
+                    <div><strong>Dimensiones:</strong> ${escapeHtml(exif.Dimensions?.width)} x ${escapeHtml(exif.Dimensions?.height)}</div>
+                    <div><strong>ISO:</strong> ${escapeHtml(exif.ISO)}</div>
+                    <div><strong>Apertura:</strong> f/${escapeHtml(exif.FNumber)}</div>
                     <div><strong>Velocidad:</strong> 1/${Math.round(1 / parseFloat(exif.ExposureTime))}s</div>
-                    <div><strong>Distancia focal:</strong> ${exif.FocalLength}mm</div>
+                    <div><strong>Distancia focal:</strong> ${escapeHtml(exif.FocalLength)}mm</div>
                 ` : ''}
             `;
 
@@ -1753,7 +1769,11 @@
 
         function showError(message) {
             const gallery = document.getElementById('gallery');
-            gallery.innerHTML = `<div class="error">${message}</div>`;
+            gallery.innerHTML = '';
+            const box = document.createElement('div');
+            box.className = 'error';
+            box.textContent = message;
+            gallery.appendChild(box);
         }
 
         function setLastUpdateDate() {
