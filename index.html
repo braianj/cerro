@@ -247,6 +247,104 @@
             text-shadow: 0 0 3px rgba(0,0,0,0.8);
         }
 
+        /* Custom color search */
+        .custom-color-sep {
+            width: 1px;
+            height: 24px;
+            background: #ccc;
+            margin: 0 6px;
+        }
+
+        .custom-color-controls {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        #customColorPicker {
+            width: 34px;
+            height: 28px;
+            padding: 0 2px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+        }
+
+        #customColorHex {
+            width: 90px;
+            padding: 4px 6px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: monospace;
+        }
+
+        #customColorHex.invalid {
+            border-color: #e74c3c;
+            background: #fdecea;
+        }
+
+        #colorTolerance {
+            padding: 4px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .custom-color-btn {
+            padding: 4px 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .custom-color-btn:hover {
+            background: #f0f0f0;
+        }
+
+        .custom-color-btn.searching {
+            border-color: #2c3e50;
+            box-shadow: 0 0 0 2px rgba(44, 62, 80, 0.3);
+        }
+
+        #clearCustomColor {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+
+        /* Palette chips inside the modal */
+        .modal-palette {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+            align-items: center;
+        }
+
+        .modal-palette-label {
+            font-size: 12px;
+            color: #888;
+            margin-right: 4px;
+        }
+
+        .modal-palette-chip {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 0 1px #bbb;
+            cursor: pointer;
+            padding: 0;
+        }
+
+        .modal-palette-chip:hover {
+            transform: scale(1.2);
+            box-shadow: 0 0 0 2px #2c3e50;
+        }
+
         .color-count-badge {
             position: absolute;
             top: -6px;
@@ -650,6 +748,19 @@
                 <div class="color-swatch" style="background-color: #1a1a1a;" onclick="filterByColor('negro')" title="Negro" data-color="negro"></div>
                 <div class="color-swatch" style="background-color: #ecf0f1;" onclick="filterByColor('blanco')" title="Blanco" data-color="blanco"></div>
                 <div class="color-swatch" style="background-color: #95a5a6;" onclick="filterByColor('gris')" title="Gris" data-color="gris"></div>
+                <span class="custom-color-sep"></span>
+                <span class="custom-color-controls" title="Buscar por color exacto. Varios hex separados por espacio buscan fotos que contengan TODOS esos colores.">
+                    <input type="color" id="customColorPicker" value="#e84d6f">
+                    <input type="text" id="customColorHex" placeholder="#hex, r,g,b o varios hex" autocomplete="off" spellcheck="false">
+                    <button type="button" class="custom-color-btn" id="eyedropperBtn" title="Tomar un color de la pantalla" style="display:none">&#127777;</button>
+                    <select id="colorTolerance" title="Qué tan parecido tiene que ser el color">
+                        <option value="exacto">Exacto</option>
+                        <option value="normal" selected>Normal</option>
+                        <option value="amplio">Amplio</option>
+                    </select>
+                    <button type="button" class="custom-color-btn" id="applyCustomColorBtn" onclick="applyCustomColor()">Buscar color</button>
+                    <button type="button" class="custom-color-btn" id="clearCustomColor" onclick="clearCustomColorFilter()" style="display:none" title="Quitar filtro de color exacto">&#10005;</button>
+                </span>
             </div>
         </header>
 
@@ -682,6 +793,7 @@
                 <span class="close" onclick="closeModal()">&times;</span>
             </div>
             <img id="modalImage" src="" alt="">
+            <div class="modal-palette" id="modalPalette"></div>
             <div class="image-info" id="imageInfo"></div>
         </div>
     </div>
@@ -695,7 +807,7 @@
         let photographers = [];
         let availableTags = [];
         let favorites = JSON.parse(localStorage.getItem('cerro-favorites') || '[]');
-        let imageColors = new Map(); // Cache: imageId -> array of color strings
+        let imageColors = new Map(); // Cache: imageId -> {c: [categorías], p: [[r,g,b,pormil], ...]}
         let tagsLoaded = false; // Flag to prevent reloading tags
         let currentTab = 'gallery'; // 'gallery' or 'favorites'
         let currentModalIndex = -1; // Index of current image in modal
@@ -735,7 +847,9 @@
                 dateTo: urlParams.get('dateTo') || '',
                 photographer: urlParams.get('photographer') || '',
                 tags: urlParams.get('tags') || '',
-                tab: urlParams.get('tab') || 'gallery'
+                tab: urlParams.get('tab') || 'gallery',
+                color: urlParams.get('color') || '',
+                tol: urlParams.get('tol') || ''
             };
         }
 
@@ -782,6 +896,10 @@
                 urlParams.set('tags', encodeURIComponent(tags.trim()));
             }
             if (currentTab === 'favorites') urlParams.set('tab', 'favorites');
+            if (customColorActive) {
+                urlParams.set('color', customColorActive.map(c => rgbToHex(c[0], c[1], c[2]).slice(1)).join(','));
+                urlParams.set('tol', document.getElementById('colorTolerance').value);
+            }
 
             // Update URL without reloading page
             const newUrl = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '');
@@ -806,6 +924,17 @@
                 console.log('Applied tag from URL:', decodedTag, '(original:', params.tags, ')');
             }
             if (params.tab === 'favorites') switchTab('favorites', true);
+            if (params.color) {
+                const colors = parseColorList(params.color);
+                if (colors) {
+                    setCustomColor(colors);
+                    if (params.tol && COLOR_TOLERANCE[params.tol]) {
+                        document.getElementById('colorTolerance').value = params.tol;
+                    }
+                    // El filtro se aplica recién cuando la galería termina de renderizar.
+                    pendingCustomColorFromUrl = true;
+                }
+            }
         }
 
         function changePerPage() {
@@ -1228,9 +1357,89 @@
             return 'otro';
         }
 
+        // ---- Búsqueda por color exacto (hex / RGB) ----
+
+        // Acepta "#a94b59", "a94b59", "#f2f", "rgb(169, 75, 89)" o "169,75,89".
+        function parseColorInput(str) {
+            if (!str) return null;
+            str = String(str).trim().toLowerCase();
+            let m = str.match(/^#?([0-9a-f]{6})$/);
+            if (m) {
+                const v = parseInt(m[1], 16);
+                return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+            }
+            m = str.match(/^#?([0-9a-f]{3})$/);
+            if (m) {
+                return [0, 1, 2].map(i => parseInt(m[1][i] + m[1][i], 16));
+            }
+            m = str.match(/^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/) ||
+                str.match(/^(\d{1,3})\s*[, ]\s*(\d{1,3})\s*[, ]\s*(\d{1,3})$/);
+            if (m) {
+                const rgb = [+m[1], +m[2], +m[3]];
+                return rgb.every(v => v <= 255) ? rgb : null;
+            }
+            return null;
+        }
+
+        function rgbToHex(r, g, b) {
+            return '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+        }
+
+        // Lista de colores: varios hex separados por espacio, coma o "+"
+        // ("#f24d7f #2e6b63"), o un único color en cualquier formato de
+        // parseColorInput. Una foto matchea si contiene TODOS los colores.
+        function parseColorList(str) {
+            if (!str) return null;
+            const s = String(str).trim().toLowerCase();
+            if (!s) return null;
+            const tokens = s.split(/[\s,+]+/).filter(Boolean);
+            const isHex = t => /^#?[0-9a-f]{6}$/.test(t) || /^#?[0-9a-f]{3}$/.test(t);
+            if (tokens.length > 1 && tokens.every(isHex)) {
+                return tokens.map(parseColorInput);
+            }
+            const single = parseColorInput(s);
+            return single ? [single] : null;
+        }
+
+        // Distancia "redmean": aproximación perceptual barata (0 = idéntico).
+        function colorDistance(a, b) {
+            const rMean = (a[0] + b[0]) / 2;
+            const dr = a[0] - b[0];
+            const dg = a[1] - b[1];
+            const db = a[2] - b[2];
+            return Math.sqrt((2 + rMean / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rMean) / 256) * db * db);
+        }
+
+        // El JPEG + el resample corren los valores, así que además de la distancia
+        // absoluta hay una regla por tono: si los dos colores tienen saturación real
+        // y el matiz coincide, es "el mismo color" aunque el brillo difiera.
+        // La regla exige también saturación parecida: sin eso, un rosa chicle (S~84)
+        // matchea cualquier campera roja apagada (S~39) y el filtro deja de filtrar.
+        // dist solo absorbe corrimientos de JPEG/resample del MISMO color;
+        // las variaciones de sombra/brillo las cubre la regla de tono de abajo.
+        const COLOR_TOLERANCE = {
+            exacto: { dist: 60, hue: 0, light: 0, sat: 0 },
+            normal: { dist: 90, hue: 14, light: 30, sat: 25 },
+            amplio: { dist: 120, hue: 22, light: 40, sat: 35 }
+        };
+
+        function matchesCustomColor(target, entry, tolName) {
+            const tol = COLOR_TOLERANCE[tolName] || COLOR_TOLERANCE.normal;
+            if (colorDistance(target, entry) <= tol.dist) return true;
+            if (!tol.hue) return false;
+
+            const [th, ts, tl] = rgbToHsl(target[0], target[1], target[2]);
+            const [eh, es, el] = rgbToHsl(entry[0], entry[1], entry[2]);
+            if (ts < 15 || es < 15) return false; // la regla de tono es solo para colores vivos
+            const hueDiff = Math.min(Math.abs(th - eh), 360 - Math.abs(th - eh));
+            return hueDiff <= tol.hue && Math.abs(tl - el) <= tol.light && Math.abs(ts - es) <= tol.sat;
+        }
+
         // Persistent color cache in localStorage
         const COLOR_CACHE_KEY = 'cerro-image-colors';
-        const COLOR_CACHE_VERSION = 'v3'; // Bump to invalidate cache
+        // v4: el formato pasó de ['rojo', ...] a {c: [categorías], p: [paleta rgb]}.
+        // El bump invalida el cache viejo de todos los usuarios a propósito.
+        const COLOR_CACHE_VERSION = 'v4';
         function loadColorCache() {
             try {
                 const raw = localStorage.getItem(COLOR_CACHE_KEY);
@@ -1240,8 +1449,11 @@
                     localStorage.removeItem(COLOR_CACHE_KEY);
                     return;
                 }
-                for (const [id, colors] of Object.entries(parsed)) {
-                    if (id !== '_version') imageColors.set(id, colors);
+                for (const [id, entry] of Object.entries(parsed)) {
+                    // Solo entradas con el formato v4; cualquier otra cosa se descarta.
+                    if (id !== '_version' && entry && Array.isArray(entry.c)) {
+                        imageColors.set(id, { c: entry.c, p: Array.isArray(entry.p) ? entry.p : [] });
+                    }
                 }
             } catch(e) { localStorage.removeItem(COLOR_CACHE_KEY); }
         }
@@ -1268,51 +1480,112 @@
             }
         }
 
-        // Returns array of all colors present in the image (>= 3% of pixels)
-        function analyzePixels(sourceImg) {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            const sampleSize = 80;
-            canvas.width = sampleSize;
-            canvas.height = sampleSize;
+        // Pure pixel-crunching over an RGBA byte array. Separated from the canvas
+        // so it can be unit-tested in node. Returns:
+        //   { c: [categorías con >= 3% de presencia],
+        //     p: [[r, g, b, pormil], ...] — paleta real: colores dominantes (>= 2%)
+        //        MÁS acentos saturados chicos (S >= 18%, >= 0.05% del área).
+        //        Los acentos son lo que hace encontrable una campera de color
+        //        en una foto que es 90% nieve. }
+        function buildColorSummary(data) {
+            const DOMINANT_SHARE = 0.02;   // >= 2% del área
+            const ACCENT_SHARE = 0.0005;   // >= 0.05% del área (acentos chicos)
+            const ACCENT_MIN_SAT = 18;     // solo píxeles con color de verdad
 
-            const sw = sourceImg.naturalWidth || sourceImg.width;
-            const sh = sourceImg.naturalHeight || sourceImg.height;
-
-            // Sample center 60% of image (where subject is)
-            const cropX = sw * 0.2;
-            const cropY = sh * 0.15;
-            const cropW = sw * 0.6;
-            const cropH = sh * 0.7;
-            ctx.drawImage(sourceImg, cropX, cropY, cropW, cropH, 0, 0, sampleSize, sampleSize);
-            const imageData = ctx.getImageData(0, 0, sampleSize, sampleSize);
-            const data = imageData.data;
-
-            const colorCounts = {};
+            const catCounts = {};
+            const buckets = new Map(); // rgb cuantizado a 32 niveles -> [sumR, sumG, sumB, n]
+            // Los acentos se agrupan por banda de matiz (15°), NO por bucket RGB:
+            // un acento chico (la campera de una persona) reparte sus píxeles entre
+            // varios buckets RGB y ninguno llega solo al piso, pero todos comparten matiz.
+            const hueBins = new Map();
             let totalPixels = 0;
+
             for (let i = 0; i < data.length; i += 4) {
+                if (data[i + 3] < 128) continue;
                 const r = data[i];
                 const g = data[i + 1];
                 const b = data[i + 2];
-                const a = data[i + 3];
-                if (a < 128) continue;
                 totalPixels++;
+
                 const category = getColorCategory(r, g, b);
-                colorCounts[category] = (colorCounts[category] || 0) + 1;
-            }
+                catCounts[category] = (catCounts[category] || 0) + 1;
 
-            if (totalPixels === 0) return ['gris'];
+                const key = ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5);
+                let acc = buckets.get(key);
+                if (!acc) {
+                    acc = [0, 0, 0, 0];
+                    buckets.set(key, acc);
+                }
+                acc[0] += r;
+                acc[1] += g;
+                acc[2] += b;
+                acc[3]++;
 
-            // Return all colors with >= 3% presence
-            const MIN_PRESENCE = 0.03;
-            const presentColors = [];
-            for (const [color, count] of Object.entries(colorCounts)) {
-                if (count / totalPixels >= MIN_PRESENCE) {
-                    presentColors.push(color);
+                const [h, s] = rgbToHsl(r, g, b);
+                if (s >= ACCENT_MIN_SAT) {
+                    const bin = Math.floor(h / 15) % 24;
+                    let hacc = hueBins.get(bin);
+                    if (!hacc) {
+                        hacc = [0, 0, 0, 0];
+                        hueBins.set(bin, hacc);
+                    }
+                    hacc[0] += r;
+                    hacc[1] += g;
+                    hacc[2] += b;
+                    hacc[3]++;
                 }
             }
 
-            return presentColors.length > 0 ? presentColors : ['gris'];
+            if (totalPixels === 0) return { c: ['gris'], p: [] };
+
+            const MIN_PRESENCE = 0.03;
+            const cats = [];
+            for (const [color, count] of Object.entries(catCounts)) {
+                if (count / totalPixels >= MIN_PRESENCE) cats.push(color);
+            }
+            if (cats.length === 0) cats.push('gris');
+
+            const byShare = (a, b) => b[3] - a[3];
+
+            const dominant = [];
+            buckets.forEach((acc) => {
+                const n = acc[3];
+                if (n / totalPixels < DOMINANT_SHARE) return;
+                dominant.push([Math.round(acc[0] / n), Math.round(acc[1] / n), Math.round(acc[2] / n), n / totalPixels]);
+            });
+            dominant.sort(byShare);
+
+            const accents = [];
+            hueBins.forEach((acc) => {
+                const n = acc[3];
+                if (n / totalPixels < ACCENT_SHARE) return;
+                const r = Math.round(acc[0] / n);
+                const g = Math.round(acc[1] / n);
+                const b = Math.round(acc[2] / n);
+                // Si el matiz ya está representado por un dominante, no duplicar.
+                if (dominant.some(d => colorDistance([r, g, b], d) <= 60)) return;
+                accents.push([r, g, b, n / totalPixels]);
+            });
+            accents.sort(byShare);
+
+            const palette = dominant.slice(0, 8)
+                .concat(accents.slice(0, 6))
+                .map(([r, g, b, share]) => [r, g, b, Math.max(1, Math.round(share * 1000))]);
+
+            return { c: cats, p: palette };
+        }
+
+        function analyzePixels(sourceImg) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            // 160 y frame completo (antes 80 y crop al centro): los acentos chicos
+            // sobreviven mejor al resample y no se pierde lo que queda en los bordes.
+            const sampleSize = 160;
+            canvas.width = sampleSize;
+            canvas.height = sampleSize;
+            ctx.drawImage(sourceImg, 0, 0, sampleSize, sampleSize);
+            const data = ctx.getImageData(0, 0, sampleSize, sampleSize).data;
+            return buildColorSummary(data);
         }
 
         // Extract colors from image using CORS proxy
@@ -1337,12 +1610,12 @@
                             const colors = analyzePixels(corsImg);
                             storeResult(colors);
                         } catch(e) {
-                            storeResult(['gris']);
+                            storeResult({ c: ['gris'], p: [] });
                         }
                         taskDone();
                     };
                     corsImg.onerror = () => {
-                        storeResult(['gris']);
+                        storeResult({ c: ['gris'], p: [] });
                         taskDone();
                     };
                     corsImg.src = 'https://corsproxy.io/?' + encodeURIComponent(img.src);
@@ -1448,6 +1721,7 @@
 
         async function filterByColor(color) {
             selectedColorFilter = color;
+            resetCustomColorUI(); // los dos filtros de color son mutuamente excluyentes
 
             // Update swatch active states
             document.querySelectorAll('.color-swatch, .color-swatch-all').forEach(s => s.classList.remove('active'));
@@ -1482,8 +1756,8 @@
                     return;
                 }
 
-                const promise = extractImageColors(img, imageId).then(colors => {
-                    if (Array.isArray(colors) && colors.includes(color)) {
+                const promise = extractImageColors(img, imageId).then(entry => {
+                    if (entry && Array.isArray(entry.c) && entry.c.includes(color)) {
                         container.style.display = '';
                         visibleCount++;
                     } else {
@@ -1505,11 +1779,99 @@
             }
         }
 
+        // ---- Filtro por color exacto ----
+
+        let customColorActive = null; // [[r,g,b], ...] cuando el filtro custom está aplicado
+        let pendingCustomColorFromUrl = false; // ?color=... espera a que la galería renderice
+
+        // Acepta un color ([r,g,b]) o una lista de colores ([[r,g,b], ...]).
+        function setCustomColor(rgbOrList) {
+            const list = Array.isArray(rgbOrList[0]) ? rgbOrList : [rgbOrList];
+            const hexes = list.map(c => rgbToHex(c[0], c[1], c[2]));
+            document.getElementById('customColorPicker').value = hexes[0];
+            document.getElementById('customColorHex').value = hexes.join(' ');
+            document.getElementById('customColorHex').classList.remove('invalid');
+        }
+
+        // Limpia el estado visual del filtro custom sin tocar la galería.
+        function resetCustomColorUI() {
+            customColorActive = null;
+            document.getElementById('clearCustomColor').style.display = 'none';
+            document.getElementById('applyCustomColorBtn').classList.remove('searching');
+            updateUrlParams();
+        }
+
+        async function applyCustomColor() {
+            const hexInput = document.getElementById('customColorHex');
+            const colors = parseColorList(hexInput.value) || parseColorList(document.getElementById('customColorPicker').value);
+            if (!colors) {
+                hexInput.classList.add('invalid');
+                return;
+            }
+            hexInput.classList.remove('invalid');
+            setCustomColor(colors);
+
+            // Desactivar el filtro por categoría
+            selectedColorFilter = '';
+            document.querySelectorAll('.color-swatch, .color-swatch-all').forEach(s => s.classList.remove('active'));
+
+            customColorActive = colors;
+            const tolName = document.getElementById('colorTolerance').value;
+            document.getElementById('clearCustomColor').style.display = '';
+            document.getElementById('applyCustomColorBtn').classList.add('searching');
+
+            const gallery = document.getElementById('gallery');
+            const allContainers = gallery.querySelectorAll('.image-container');
+            const existingNoResults = gallery.querySelector('.no-color-results');
+            if (existingNoResults) existingNoResults.remove();
+
+            let visibleCount = 0;
+            const promises = [];
+
+            allContainers.forEach(container => {
+                const img = container.querySelector('img');
+                const imageId = container.dataset.imageId;
+                if (!imageId) {
+                    container.style.display = 'none';
+                    return;
+                }
+
+                const promise = extractImageColors(img, imageId).then(entry => {
+                    // El filtro pudo cambiar mientras se analizaba: no pisar el estado nuevo.
+                    if (customColorActive !== colors) return;
+                    const palette = (entry && Array.isArray(entry.p)) ? entry.p : [];
+                    // Combinación: la foto tiene que contener TODOS los colores pedidos.
+                    const match = colors.every(target => palette.some(p => matchesCustomColor(target, p, tolName)));
+                    container.style.display = match ? '' : 'none';
+                    if (match) visibleCount++;
+                });
+                promises.push(promise);
+            });
+
+            await Promise.all(promises);
+            if (customColorActive !== colors) return;
+            updateColorCounts();
+            updateUrlParams();
+
+            if (visibleCount === 0) {
+                const hexes = colors.map(c => rgbToHex(c[0], c[1], c[2])).join(' + ');
+                const noResults = document.createElement('div');
+                noResults.className = 'no-color-results';
+                noResults.textContent = `Ninguna imagen de esta página contiene ${colors.length > 1 ? 'los colores' : 'el color'} ${hexes} (tolerancia: ${tolName}). Probá con tolerancia "Amplio" o en otra página.`;
+                noResults.style.cssText = 'text-align:center;padding:40px;color:#666;font-size:16px;grid-column:1/-1;';
+                gallery.appendChild(noResults);
+            }
+        }
+
+        function clearCustomColorFilter() {
+            resetCustomColorUI();
+            filterByColor('');
+        }
+
         function updateColorCounts() {
             const counts = {};
-            imageColors.forEach((colors) => {
-                if (!Array.isArray(colors)) colors = [colors];
-                colors.forEach(color => {
+            imageColors.forEach((entry) => {
+                (entry.c || []).forEach(color => {
                     counts[color] = (counts[color] || 0) + 1;
                 });
             });
@@ -1600,12 +1962,20 @@
                 gallery.appendChild(imageContainer);
             });
 
-            // Reset color filter (only on gallery tab)
+            // Reset color filters (only on gallery tab)
             if (currentTab !== 'favorites') {
                 selectedColorFilter = '';
+                resetCustomColorUI();
                 document.querySelectorAll('.color-swatch, .color-swatch-all').forEach(s => s.classList.remove('active'));
                 document.querySelector('.color-swatch-all')?.classList.add('active');
                 updateColorCounts();
+
+                // Un ?color=... en la URL es acción explícita del usuario: aplicarlo
+                // ahora que la galería está renderizada (regla 4: nunca eager sin pedido).
+                if (pendingCustomColorFromUrl) {
+                    pendingCustomColorFromUrl = false;
+                    applyCustomColor();
+                }
             }
         }
 
@@ -1640,6 +2010,49 @@
                     <div><strong>Distancia focal:</strong> ${escapeHtml(exif.FocalLength)}mm</div>
                 ` : ''}
             `;
+
+            // Paleta de colores de la foto: tocar un chip busca ese color en la galería.
+            // Es la vía directa para "vi a alguien en esta foto, quiero las demás".
+            const paletteRow = document.getElementById('modalPalette');
+            paletteRow.innerHTML = '';
+            const requestedId = image._id;
+            extractImageColors(modalImage, requestedId).then(entry => {
+                // El usuario pudo navegar a otra foto mientras se analizaba esta.
+                const stillCurrent = currentModalIndex >= 0 && currentImages[currentModalIndex]?._id === requestedId;
+                if (!stillCurrent || !entry || !Array.isArray(entry.p) || entry.p.length === 0) return;
+
+                const label = document.createElement('span');
+                label.className = 'modal-palette-label';
+                label.textContent = 'Buscar por color:';
+                paletteRow.appendChild(label);
+
+                entry.p.forEach(([r, g, b]) => {
+                    const hex = rgbToHex(r, g, b);
+                    const chip = document.createElement('button');
+                    chip.type = 'button';
+                    chip.className = 'modal-palette-chip';
+                    chip.style.backgroundColor = hex;
+                    chip.title = `Buscar fotos que contengan ${hex}. Shift+click: sumarlo a la combinación (ej. casco + pantalón) sin cerrar la foto.`;
+                    chip.onclick = (e) => {
+                        e.stopPropagation();
+                        if (e.shiftKey) {
+                            // Combinar: agrega este color al filtro y deja el modal
+                            // abierto para seguir eligiendo (casco + pantalón).
+                            const current = (customColorActive || []).slice();
+                            if (!current.some(c => c[0] === r && c[1] === g && c[2] === b)) {
+                                current.push([r, g, b]);
+                            }
+                            setCustomColor(current);
+                            applyCustomColor();
+                        } else {
+                            closeModal();
+                            setCustomColor([r, g, b]);
+                            applyCustomColor();
+                        }
+                    };
+                    paletteRow.appendChild(chip);
+                });
+            });
 
             modal.style.display = 'block';
         }
@@ -1839,6 +2252,40 @@
             // Establecer perPage si no viene de URL
             if (!params.perPage) {
                 document.getElementById('perPage').value = perPage;
+            }
+
+            // Controles del buscador de color exacto
+            const picker = document.getElementById('customColorPicker');
+            const hexField = document.getElementById('customColorHex');
+            picker.addEventListener('input', () => {
+                hexField.value = picker.value;
+                hexField.classList.remove('invalid');
+            });
+            hexField.addEventListener('input', () => {
+                const colors = parseColorList(hexField.value);
+                if (colors) {
+                    picker.value = rgbToHex(colors[0][0], colors[0][1], colors[0][2]);
+                    hexField.classList.remove('invalid');
+                }
+            });
+            hexField.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') applyCustomColor();
+            });
+
+            // Gotero: API EyeDropper, solo Chromium. En otros browsers el botón no aparece.
+            const dropBtn = document.getElementById('eyedropperBtn');
+            if (window.EyeDropper) {
+                dropBtn.style.display = '';
+                dropBtn.onclick = async () => {
+                    try {
+                        const result = await new EyeDropper().open();
+                        const rgb = parseColorInput(result.sRGBHex);
+                        if (rgb) {
+                            setCustomColor(rgb);
+                            applyCustomColor();
+                        }
+                    } catch (e) { /* usuario canceló, no es error */ }
+                };
             }
 
             fetchPhotographers();

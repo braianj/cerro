@@ -20,7 +20,7 @@ Rough layout of the file:
 | script: helpers | `escapeHtml`, `safeSetItem` |
 | script: URL | `getUrlParams`, `updateUrlParams`, `applyUrlParams` |
 | script: data | `fetchImages`, `fetchPhotographers`, `loadAllTags`, `loadFavorites` |
-| script: color | `extractImageColors`, `analyzePixels`, `filterByColor` |
+| script: color | `buildColorSummary`, `extractImageColors`, `filterByColor`, `applyCustomColor` |
 | script: render | `displayImages`, `openModal`, `updatePagination` |
 
 ## External services
@@ -45,9 +45,11 @@ their CORS headers, or what they sanitize.
 3. **Optional-chain into API objects.** `photographerData`, `exifData` and
    `Dimensions` are missing on some records. `image.photographerData.name`
    without `?.` is a crash waiting for the right photo.
-4. **Do not re-add eager color analysis.** Color extraction runs only from
-   `filterByColor()`, on user action. It used to run on every `img.onload`,
-   which pushed up to 1000 image URLs per page load through corsproxy.io.
+4. **Do not re-add eager color analysis.** Color extraction runs only on
+   explicit user action: `filterByColor()`, `applyCustomColor()`, or opening
+   one photo in the modal (single image). It used to run on every
+   `img.onload`, which pushed up to 1000 image URLs per page load through
+   corsproxy.io. A `?color=` URL param counts as user action.
 5. **One deploy workflow only.** `.github/workflows/static.yml` owns the
    `pages` concurrency group. A second workflow on the same group makes both
    race on every push.
@@ -82,6 +84,15 @@ params in the URL. Watch the browser console for errors the whole time.
   function names, not line numbers.
 - **`updateColorCounts()` counts the persisted cache**, not the current page,
   so swatch badges can exceed what is on screen. Known, not a regression.
+- **The color cache format is v4**: `{c: [categories], p: [[r,g,b,permille]]}`.
+  `p` holds dominant colors (>= 2% of area) plus small saturated accents
+  grouped by hue band (>= 0.05%). The accents are what make a jacket findable
+  in a snow photo — do not raise that floor without re-running the ground
+  truth test. Bumping `COLOR_CACHE_VERSION` wipes every user's cache.
+- **Custom color search is AND semantics**: with several hex values, a photo
+  must contain all of them. `parseColorInput` handles one color,
+  `parseColorList` handles the list; the URL uses comma-joined hex in
+  `?color=` plus `&tol=`.
 - **`perPage` default is 100.** It was 1000. Options up to 5000 still exist in
   the select; they are slow and hammer the API.
 - **The watermark-removal button** (`openWatermarkRemover`) opens a third-party

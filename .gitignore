@@ -56,3 +56,6 @@ node_modules/
 
 # Per-developer Claude Code overrides (the kit itself is versioned)
 .claude/settings.local.json
+
+# Session attachments dropped by local tooling
+.atelier/

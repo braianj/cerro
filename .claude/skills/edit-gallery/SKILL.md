@@ -40,9 +40,10 @@ Changes to `.github/workflows/` — see `ship-to-production` instead.
    objects and hits the quota on large sessions.
 
 5. **If the change touches color analysis, keep it lazy.** Rule 4. Extraction
-   belongs in `filterByColor()`, on user action. Do not call
-   `extractImageColors()` from `img.onload` or from `displayImages()`; that
-   sends every image URL on the page to corsproxy.io.
+   belongs in `filterByColor()`, `applyCustomColor()` or a single modal open —
+   always user action. Do not call `extractImageColors()` from `img.onload` or
+   from `displayImages()`; that sends every image URL on the page to
+   corsproxy.io. Cache entries are v4: `{c: [categories], p: [[r,g,b,permille]]}`.
 
 6. **Verify.** The hook runs `node --check` automatically on save. Then:
 
@@ -60,6 +61,9 @@ Changes to `.github/workflows/` — see `ship-to-production` instead.
   ones are escaped; a new one starts unescaped.
 - Bumping `COLOR_CACHE_VERSION` without reason — it wipes every user's cached
   color analysis and forces a full re-proxy on next filter.
+- Raising the accent floor (`ACCENT_SHARE`) or saturation gate in
+  `buildColorSummary` — small saturated accents are the whole point of the
+  custom color search (a jacket in a snow photo is ~0.1% of the area).
 - Assuming `updateColorCounts()` reflects the current page. It counts the
   persisted cache across all pages ever viewed.
 - Reintroducing a `perPage` default above 100. Rule: options up to 5000 exist
