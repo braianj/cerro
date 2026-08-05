@@ -46,10 +46,13 @@ their CORS headers, or what they sanitize.
    `Dimensions` are missing on some records. `image.photographerData.name`
    without `?.` is a crash waiting for the right photo.
 4. **Do not re-add eager color analysis.** Color extraction runs only on
-   explicit user action: `filterByColor()`, `applyCustomColor()`, or opening
-   one photo in the modal (single image). It used to run on every
+   explicit user action: `filterByColor()`, `applyCustomColor()`, opening one
+   photo in the modal (single image), or `searchEntireRange()` (the "whole
+   range" button — capped at `RANGE_SEARCH_MAX`, stoppable, aborted by any
+   filter/tab/page change via `stopRangeSearch()`). It used to run on every
    `img.onload`, which pushed up to 1000 image URLs per page load through
-   corsproxy.io. A `?color=` URL param counts as user action.
+   corsproxy.io. A `?color=` URL param counts as user action. The custom
+   filter persists across pagination and re-applies per page.
 5. **One deploy workflow only.** `.github/workflows/static.yml` owns the
    `pages` concurrency group. A second workflow on the same group makes both
    race on every push.
@@ -93,6 +96,10 @@ params in the URL. Watch the browser console for errors the whole time.
   must contain all of them. `parseColorInput` handles one color,
   `parseColorList` handles the list; the URL uses comma-joined hex in
   `?color=` plus `&tol=`.
+- **Cache writes are debounced** (`scheduleSaveColorCache`, 2s): a direct
+  `saveColorCache()` per result is O(n²) when the range search analyzes
+  thousands of photos. Proxy network errors are NOT cached (`err: true`
+  entries) so a transient failure doesn't stick as "gris" forever.
 - **`perPage` default is 100.** It was 1000. Options up to 5000 still exist in
   the select; they are slow and hammer the API.
 - **The watermark-removal button** (`openWatermarkRemover`) opens a third-party

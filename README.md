@@ -11,5 +11,7 @@ Una galería web moderna para visualizar imágenes con filtros avanzados y funci
 - **Color**: Por categoría (rojo, azul, ...) o por color exacto (hex/RGB, con
   gotero y tolerancia). Varios hex a la vez buscan fotos que contengan todos
   (ej. casco + pantalón). Al abrir una foto, su paleta es clickeable para
-  buscar por esos colores. Compartible por URL (`?color=f24d7f,3a685e&tol=amplio`)
+  buscar por esos colores. Compartible por URL (`?color=f24d7f,3a685e&tol=amplio`).
+  El filtro persiste al cambiar de página, y "Buscar en todo el rango" recorre
+  todas las páginas del rango de fechas con progreso y botón para detener
 - **Paginación**: Configurable (50, 100, 200, 500, 1000, 2000, 5000 imágenes por página)

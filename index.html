@@ -315,6 +315,19 @@
             font-weight: bold;
         }
 
+        .color-search-status {
+            font-size: 12px;
+            color: #777;
+            text-align: center;
+            min-height: 16px;
+            padding: 2px 0;
+        }
+
+        #rangeSearchBtn.running {
+            border-color: #e74c3c;
+            color: #e74c3c;
+        }
+
         /* Palette chips inside the modal */
         .modal-palette {
             display: flex;
@@ -759,9 +772,11 @@
                         <option value="amplio">Amplio</option>
                     </select>
                     <button type="button" class="custom-color-btn" id="applyCustomColorBtn" onclick="applyCustomColor()">Buscar color</button>
+                    <button type="button" class="custom-color-btn" id="rangeSearchBtn" onclick="toggleRangeSearch()" title="Recorre TODAS las páginas del rango de fechas buscando estos colores. Puede tardar varios minutos; se puede detener.">Buscar en todo el rango</button>
                     <button type="button" class="custom-color-btn" id="clearCustomColor" onclick="clearCustomColorFilter()" style="display:none" title="Quitar filtro de color exacto">&#10005;</button>
                 </span>
             </div>
+            <div class="color-search-status" id="colorSearchStatus"></div>
         </header>
 
         <!-- Paginado superior -->
@@ -1462,6 +1477,23 @@
             imageColors.forEach((colors, id) => { obj[id] = colors; });
             safeSetItem(COLOR_CACHE_KEY, JSON.stringify(obj));
         }
+        // Serializar el mapa entero en cada resultado es O(n²) cuando se analizan
+        // miles de fotos (búsqueda por rango). Se agrupan escrituras cada 2s.
+        let saveColorCacheTimer = null;
+        function scheduleSaveColorCache() {
+            if (saveColorCacheTimer) return;
+            saveColorCacheTimer = setTimeout(() => {
+                saveColorCacheTimer = null;
+                saveColorCache();
+            }, 2000);
+        }
+        window.addEventListener('pagehide', () => {
+            if (saveColorCacheTimer) {
+                clearTimeout(saveColorCacheTimer);
+                saveColorCacheTimer = null;
+                saveColorCache();
+            }
+        });
         loadColorCache();
 
         // Queue to limit concurrent proxy requests
@@ -1598,7 +1630,7 @@
 
                 const storeResult = (colors) => {
                     imageColors.set(imageId, colors);
-                    saveColorCache();
+                    scheduleSaveColorCache();
                     resolve(colors);
                 };
 
@@ -1615,7 +1647,9 @@
                         taskDone();
                     };
                     corsImg.onerror = () => {
-                        storeResult({ c: ['gris'], p: [] });
+                        // Error de red/proxy: transitorio. NO se cachea, así el
+                        // próximo intento reintenta en vez de quedar "gris" para siempre.
+                        resolve({ c: ['gris'], p: [], err: true });
                         taskDone();
                     };
                     corsImg.src = 'https://corsproxy.io/?' + encodeURIComponent(img.src);
@@ -1794,14 +1828,19 @@
         }
 
         // Limpia el estado visual del filtro custom sin tocar la galería.
+        // También aborta una búsqueda por rango en curso: cualquier cambio de
+        // filtro invalida sus resultados parciales.
         function resetCustomColorUI() {
+            stopRangeSearch();
             customColorActive = null;
             document.getElementById('clearCustomColor').style.display = 'none';
             document.getElementById('applyCustomColorBtn').classList.remove('searching');
+            document.getElementById('colorSearchStatus').textContent = '';
             updateUrlParams();
         }
 
         async function applyCustomColor() {
+            stopRangeSearch(); // un filtro de página nuevo invalida la corrida de rango
             const hexInput = document.getElementById('customColorHex');
             const colors = parseColorList(hexInput.value) || parseColorList(document.getElementById('customColorPicker').value);
             if (!colors) {
@@ -1825,7 +1864,11 @@
             const existingNoResults = gallery.querySelector('.no-color-results');
             if (existingNoResults) existingNoResults.remove();
 
+            const status = document.getElementById('colorSearchStatus');
+            const toAnalyze = Array.from(allContainers).filter(c => c.dataset.imageId);
             let visibleCount = 0;
+            let analyzed = 0;
+            let proxyErrors = 0;
             const promises = [];
 
             allContainers.forEach(container => {
@@ -1839,11 +1882,16 @@
                 const promise = extractImageColors(img, imageId).then(entry => {
                     // El filtro pudo cambiar mientras se analizaba: no pisar el estado nuevo.
                     if (customColorActive !== colors) return;
+                    analyzed++;
+                    if (entry && entry.err) proxyErrors++;
                     const palette = (entry && Array.isArray(entry.p)) ? entry.p : [];
                     // Combinación: la foto tiene que contener TODOS los colores pedidos.
                     const match = colors.every(target => palette.some(p => matchesCustomColor(target, p, tolName)));
                     container.style.display = match ? '' : 'none';
                     if (match) visibleCount++;
+                    if (analyzed % 5 === 0 || analyzed === toAnalyze.length) {
+                        status.textContent = `Analizando colores ${analyzed}/${toAnalyze.length}… ${visibleCount} coinciden`;
+                    }
                 });
                 promises.push(promise);
             });
@@ -1853,19 +1901,172 @@
             updateColorCounts();
             updateUrlParams();
 
+            const errNote = proxyErrors > 0 ? ` (${proxyErrors} fotos no se pudieron analizar, reintentá)` : '';
+            status.textContent = `${visibleCount} de ${toAnalyze.length} fotos de esta página coinciden${errNote}`;
+
             if (visibleCount === 0) {
                 const hexes = colors.map(c => rgbToHex(c[0], c[1], c[2])).join(' + ');
                 const noResults = document.createElement('div');
                 noResults.className = 'no-color-results';
-                noResults.textContent = `Ninguna imagen de esta página contiene ${colors.length > 1 ? 'los colores' : 'el color'} ${hexes} (tolerancia: ${tolName}). Probá con tolerancia "Amplio" o en otra página.`;
+                noResults.textContent = `Ninguna imagen de esta página contiene ${colors.length > 1 ? 'los colores' : 'el color'} ${hexes} (tolerancia: ${tolName}). Probá "Buscar en todo el rango", con tolerancia "Amplio", o en otra página.`;
                 noResults.style.cssText = 'text-align:center;padding:40px;color:#666;font-size:16px;grid-column:1/-1;';
                 gallery.appendChild(noResults);
             }
         }
 
         function clearCustomColorFilter() {
-            resetCustomColorUI();
+            resetCustomColorUI(); // detiene la búsqueda de rango y limpia el estado
             filterByColor('');
+        }
+
+        // ---- Búsqueda en todo el rango de fechas ----
+        // Recorre TODAS las páginas del rango vía API y analiza cada foto por
+        // corsproxy (cola de 6 concurrentes). Es pesado a propósito del usuario:
+        // solo arranca con el botón, muestra progreso y se puede detener.
+
+        const RANGE_SEARCH_MAX = 8000;   // tope de fotos analizadas por corrida
+        const RANGE_API_PER_PAGE = 1000; // tamaño de página contra la API
+        let rangeSearchRunning = false;
+        let rangeSearchVersion = 0;
+
+        function stopRangeSearch() {
+            if (!rangeSearchRunning) return;
+            rangeSearchRunning = false;
+            rangeSearchVersion++;
+            const btn = document.getElementById('rangeSearchBtn');
+            btn.textContent = 'Buscar en todo el rango';
+            btn.classList.remove('running');
+        }
+
+        function toggleRangeSearch() {
+            if (rangeSearchRunning) {
+                const status = document.getElementById('colorSearchStatus');
+                stopRangeSearch();
+                status.textContent += ' — detenida';
+                return;
+            }
+            searchEntireRange();
+        }
+
+        async function searchEntireRange() {
+            const hexInput = document.getElementById('customColorHex');
+            const colors = parseColorList(hexInput.value) || parseColorList(document.getElementById('customColorPicker').value);
+            if (!colors) {
+                hexInput.classList.add('invalid');
+                return;
+            }
+            if (currentTab === 'favorites') {
+                // skipLoad: si disparara la carga normal, su displayImages
+                // abortaría esta búsqueda apenas arrancada.
+                switchTab('gallery', true);
+            }
+            hexInput.classList.remove('invalid');
+            setCustomColor(colors);
+            customColorActive = colors;
+            selectedColorFilter = '';
+            document.querySelectorAll('.color-swatch, .color-swatch-all').forEach(s => s.classList.remove('active'));
+            document.getElementById('clearCustomColor').style.display = '';
+
+            const tolName = document.getElementById('colorTolerance').value;
+            const status = document.getElementById('colorSearchStatus');
+            const btn = document.getElementById('rangeSearchBtn');
+            const gallery = document.getElementById('gallery');
+
+            rangeSearchRunning = true;
+            const myVersion = ++rangeSearchVersion;
+            const active = () => rangeSearchRunning && rangeSearchVersion === myVersion;
+            btn.textContent = 'Detener búsqueda';
+            btn.classList.add('running');
+
+            gallery.innerHTML = '';
+            const matches = [];
+            currentImages = matches; // el modal navega sobre los resultados
+            let analyzed = 0;
+            let proxyErrors = 0;
+            let apiPage = 1;
+            let totalSeen = 0;
+
+            const dateFrom = document.getElementById('dateFrom').value + 'T00:00:00.000Z';
+            const dateTo = document.getElementById('dateTo').value + 'T23:59:59.999Z';
+            const selectedPhotographer = document.getElementById('photographer').value;
+            const selectedTag = document.getElementById('tags').value;
+
+            const updateStatus = (extra) => {
+                status.textContent = `Buscando en el rango: ${analyzed} analizadas — ${matches.length} coincidencias` +
+                    (proxyErrors ? ` — ${proxyErrors} errores` : '') + (extra || '');
+            };
+            updateStatus();
+
+            try {
+                while (active() && analyzed < RANGE_SEARCH_MAX) {
+                    const response = await fetch('https://api1.foti.ar/images/search/client', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            filters: {
+                                date: { from: dateFrom, to: dateTo },
+                                photographer: selectedPhotographer || null,
+                                order: { by: "creationDate", order: "1" },
+                                tags: selectedTag ? [{ tag: selectedTag }] : [],
+                                favorites: { active: false, images: [] },
+                                purchases: { active: false, images: [] }
+                            },
+                            pagination: { perPage: RANGE_API_PER_PAGE, actualPage: apiPage },
+                            purchased: []
+                        })
+                    });
+                    if (!response.ok) throw new Error(`Error API: ${response.status}`);
+                    const data = await response.json();
+                    if (!active()) return;
+                    const batch = (data.ok && data.images) ? data.images : [];
+                    if (batch.length === 0) break;
+                    totalSeen += batch.length;
+
+                    const batchPromises = batch.map(image => {
+                        if (analyzed >= RANGE_SEARCH_MAX) return Promise.resolve();
+                        return extractImageColors({ src: image.copyFileName }, image._id).then(entry => {
+                            if (!active()) return;
+                            analyzed++;
+                            if (entry && entry.err) proxyErrors++;
+                            const palette = (entry && Array.isArray(entry.p)) ? entry.p : [];
+                            const match = colors.every(t => palette.some(p => matchesCustomColor(t, p, tolName)));
+                            if (match) {
+                                matches.push(image);
+                                gallery.appendChild(createImageContainer(image, matches.length - 1));
+                            }
+                            if (analyzed % 10 === 0) updateStatus();
+                        });
+                    });
+                    await Promise.all(batchPromises);
+                    if (batch.length < RANGE_API_PER_PAGE) break;
+                    apiPage++;
+                }
+            } catch (error) {
+                console.error('Error en búsqueda por rango:', error);
+                if (active()) {
+                    updateStatus(' — error de conexión, búsqueda interrumpida');
+                    stopRangeSearch();
+                    return;
+                }
+            }
+
+            if (!active()) return;
+            const capped = analyzed >= RANGE_SEARCH_MAX && totalSeen > analyzed;
+            stopRangeSearch();
+            updateColorCounts();
+            updateStatus(capped
+                ? ` — tope de ${RANGE_SEARCH_MAX} alcanzado: acotá el rango de fechas para cubrir el resto`
+                : ' — búsqueda completa');
+
+            if (matches.length === 0) {
+                const hexes = colors.map(c => rgbToHex(c[0], c[1], c[2])).join(' + ');
+                gallery.innerHTML = '';
+                const noResults = document.createElement('div');
+                noResults.className = 'no-color-results';
+                noResults.textContent = `Ninguna foto del rango contiene ${colors.length > 1 ? 'los colores' : 'el color'} ${hexes} (tolerancia: ${tolName}).`;
+                noResults.style.cssText = 'text-align:center;padding:40px;color:#666;font-size:16px;grid-column:1/-1;';
+                gallery.appendChild(noResults);
+            }
         }
 
         function updateColorCounts() {
@@ -1892,7 +2093,69 @@
             });
         }
 
+        // Crea el nodo de una foto en la grilla. Lo usan displayImages (página
+        // normal) y la búsqueda por rango (que agrega matches de a uno).
+        // Sin análisis de color en img.onload (regla 4): pasa cada URL por
+        // corsproxy.io (tercero) y antes corría eager sobre toda la página.
+        function createImageContainer(image, index) {
+            const imageContainer = document.createElement('div');
+            imageContainer.className = 'image-container';
+            imageContainer.dataset.imageId = image._id;
+
+            // Detect orientation from EXIF data
+            const exif = image.exifData;
+            if (exif && exif.Dimensions) {
+                const w = exif.Dimensions.width;
+                const h = exif.Dimensions.height;
+                if (h > w) {
+                    imageContainer.classList.add('portrait');
+                }
+            }
+
+            const img = document.createElement('img');
+            img.src = image.copyFileName;
+            img.alt = `Imagen ${index + 1}`;
+            img.loading = 'lazy';
+            img.onclick = () => openModal(image);
+
+            // Fallback orientation detection from natural dimensions
+            img.onload = function() {
+                if (!exif || !exif.Dimensions) {
+                    if (this.naturalHeight > this.naturalWidth) {
+                        imageContainer.classList.add('portrait');
+                    }
+                }
+            };
+
+            // Favorite button
+            const favoriteBtn = document.createElement('div');
+            favoriteBtn.className = 'favorite-btn';
+            favoriteBtn.innerHTML = isFavorite(image._id) ? '❤️' : '🤍';
+            favoriteBtn.onclick = (e) => toggleFavorite(image._id, e);
+
+            const imageInfo = document.createElement('div');
+            imageInfo.className = 'image-overlay';
+
+            const date = new Date(image.creationDate).toLocaleDateString('es-ES');
+            const photographer = image.photographerData?.name || 'Sin fotógrafo';
+            const tags = image.tags.length > 0 ? image.tags.join(', ') : 'Sin etiquetas';
+
+            imageInfo.innerHTML = `
+                <div class="image-details">
+                    <div><strong>Fecha:</strong> ${escapeHtml(date)}</div>
+                    <div><strong>Fotógrafo:</strong> ${escapeHtml(photographer)}</div>
+                    <div><strong>Etiquetas:</strong> ${escapeHtml(tags)}</div>
+                </div>
+            `;
+
+            imageContainer.appendChild(img);
+            imageContainer.appendChild(favoriteBtn);
+            imageContainer.appendChild(imageInfo);
+            return imageContainer;
+        }
+
         function displayImages(images) {
+            stopRangeSearch(); // navegar la galería aborta una búsqueda de rango en curso
             const gallery = document.getElementById('gallery');
             gallery.innerHTML = '';
 
@@ -1902,79 +2165,26 @@
             }
 
             images.forEach((image, index) => {
-                const imageContainer = document.createElement('div');
-                imageContainer.className = 'image-container';
-                imageContainer.dataset.imageId = image._id;
-
-                // Detect orientation from EXIF data
-                const exif = image.exifData;
-                if (exif && exif.Dimensions) {
-                    const w = exif.Dimensions.width;
-                    const h = exif.Dimensions.height;
-                    if (h > w) {
-                        imageContainer.classList.add('portrait');
-                    }
-                }
-
-                const img = document.createElement('img');
-                img.src = image.copyFileName;
-                img.alt = `Imagen ${index + 1}`;
-                img.loading = 'lazy';
-                img.onclick = () => openModal(image);
-
-                // Fallback orientation detection from natural dimensions
-                img.onload = function() {
-                    if (!exif || !exif.Dimensions) {
-                        if (this.naturalHeight > this.naturalWidth) {
-                            imageContainer.classList.add('portrait');
-                        }
-                    }
-                    // Sin análisis de color acá: pasa cada URL por corsproxy.io (tercero) y
-                    // antes corría eager sobre toda la página. Ahora solo lo dispara
-                    // filterByColor(), cuando el usuario elige un color. Los contadores se
-                    // pintan una vez al final de displayImages() con lo que ya esté cacheado.
-                };
-
-                // Favorite button
-                const favoriteBtn = document.createElement('div');
-                favoriteBtn.className = 'favorite-btn';
-                favoriteBtn.innerHTML = isFavorite(image._id) ? '❤️' : '🤍';
-                favoriteBtn.onclick = (e) => toggleFavorite(image._id, e);
-
-                const imageInfo = document.createElement('div');
-                imageInfo.className = 'image-overlay';
-
-                const date = new Date(image.creationDate).toLocaleDateString('es-ES');
-                const photographer = image.photographerData?.name || 'Sin fotógrafo';
-                const tags = image.tags.length > 0 ? image.tags.join(', ') : 'Sin etiquetas';
-
-                imageInfo.innerHTML = `
-                    <div class="image-details">
-                        <div><strong>Fecha:</strong> ${escapeHtml(date)}</div>
-                        <div><strong>Fotógrafo:</strong> ${escapeHtml(photographer)}</div>
-                        <div><strong>Etiquetas:</strong> ${escapeHtml(tags)}</div>
-                    </div>
-                `;
-
-                imageContainer.appendChild(img);
-                imageContainer.appendChild(favoriteBtn);
-                imageContainer.appendChild(imageInfo);
-                gallery.appendChild(imageContainer);
+                gallery.appendChild(createImageContainer(image, index));
             });
 
-            // Reset color filters (only on gallery tab)
+            // Color filters (only on gallery tab)
             if (currentTab !== 'favorites') {
                 selectedColorFilter = '';
-                resetCustomColorUI();
                 document.querySelectorAll('.color-swatch, .color-swatch-all').forEach(s => s.classList.remove('active'));
                 document.querySelector('.color-swatch-all')?.classList.add('active');
                 updateColorCounts();
 
-                // Un ?color=... en la URL es acción explícita del usuario: aplicarlo
-                // ahora que la galería está renderizada (regla 4: nunca eager sin pedido).
                 if (pendingCustomColorFromUrl) {
+                    // Un ?color=... en la URL es acción explícita del usuario.
                     pendingCustomColorFromUrl = false;
                     applyCustomColor();
+                } else if (customColorActive) {
+                    // El filtro de color exacto persiste entre páginas: al navegar,
+                    // se re-aplica sobre la página nueva en lugar de borrarse.
+                    applyCustomColor();
+                } else {
+                    resetCustomColorUI();
                 }
             }
         }
