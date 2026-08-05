@@ -749,7 +749,7 @@
                 <button onclick="loadImages(1)">Filtrar</button>
             </div>
             <div class="color-palette" id="colorPalette">
-                <span class="color-palette-label" title="Analiza los colores de las fotos de esta página. Para leer los píxeles, las URLs de las imágenes pasan por corsproxy.io, un servicio externo.">Color:</span>
+                <span class="color-palette-label" title="Analiza los colores de las fotos de esta página. Para leer los píxeles, las URLs de las imágenes pasan por un proxy externo (corsproxy.io o allorigins.win).">Color:</span>
                 <div class="color-swatch-all active" onclick="filterByColor('')" title="Todos los colores"></div>
                 <div class="color-swatch" style="background-color: #e74c3c;" onclick="filterByColor('rojo')" title="Rojo" data-color="rojo"></div>
                 <div class="color-swatch" style="background-color: #e67e22;" onclick="filterByColor('naranja')" title="Naranja" data-color="naranja"></div>
@@ -1496,10 +1496,19 @@
         });
         loadColorCache();
 
+        // Proxies CORS para leer píxeles (el S3 de foti.ar no manda CORS headers,
+        // verificado 2026-08-05). Si el primero falla (rate limit 429, caída),
+        // se prueba el siguiente; el que funciona pasa a ser el preferido.
+        const PROXY_BUILDERS = [
+            (u) => 'https://corsproxy.io/?' + encodeURIComponent(u),
+            (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u)
+        ];
+        let preferredProxy = 0;
+
         // Queue to limit concurrent proxy requests
         let colorAnalysisQueue = [];
         let activeAnalysis = 0;
-        const MAX_CONCURRENT = 6;
+        const MAX_CONCURRENT = 4; // gentil con los proxies gratuitos: 6 ya gatilló 429s
 
         function processColorQueue() {
             while (activeAnalysis < MAX_CONCURRENT && colorAnalysisQueue.length > 0) {
@@ -1635,24 +1644,41 @@
                 };
 
                 const task = () => new Promise((taskDone) => {
-                    const corsImg = new Image();
-                    corsImg.crossOrigin = 'anonymous';
-                    corsImg.onload = () => {
-                        try {
-                            const colors = analyzePixels(corsImg);
-                            storeResult(colors);
-                        } catch(e) {
-                            storeResult({ c: ['gris'], p: [] });
-                        }
-                        taskDone();
+                    let attempt = 0;
+                    const maxAttempts = PROXY_BUILDERS.length * 2; // 2 rondas por la cadena
+
+                    const tryLoad = () => {
+                        const proxyIdx = (preferredProxy + attempt) % PROXY_BUILDERS.length;
+                        const corsImg = new Image();
+                        corsImg.crossOrigin = 'anonymous';
+                        corsImg.onload = () => {
+                            preferredProxy = proxyIdx; // este proxy anda: probarlo primero la próxima
+                            try {
+                                const colors = analyzePixels(corsImg);
+                                storeResult(colors);
+                            } catch(e) {
+                                storeResult({ c: ['gris'], p: [] });
+                            }
+                            taskDone();
+                        };
+                        corsImg.onerror = () => {
+                            attempt++;
+                            if (attempt < maxAttempts) {
+                                // Primera ronda: cambio rápido de proxy. Segunda: backoff
+                                // con jitter por si es un rate limit transitorio (429).
+                                const delay = attempt < PROXY_BUILDERS.length ? 150 : 2000 + Math.random() * 1500;
+                                setTimeout(tryLoad, delay);
+                            } else {
+                                // Error de red/proxy en todos los intentos: transitorio.
+                                // NO se cachea, así una próxima búsqueda reintenta en vez
+                                // de quedar "gris" para siempre.
+                                resolve({ c: ['gris'], p: [], err: true });
+                                taskDone();
+                            }
+                        };
+                        corsImg.src = PROXY_BUILDERS[proxyIdx](img.src);
                     };
-                    corsImg.onerror = () => {
-                        // Error de red/proxy: transitorio. NO se cachea, así el
-                        // próximo intento reintenta en vez de quedar "gris" para siempre.
-                        resolve({ c: ['gris'], p: [], err: true });
-                        taskDone();
-                    };
-                    corsImg.src = 'https://corsproxy.io/?' + encodeURIComponent(img.src);
+                    tryLoad();
                 });
 
                 colorAnalysisQueue.push(task);
