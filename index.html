@@ -1438,6 +1438,21 @@
             amplio: { dist: 120, hue: 22, light: 40, sat: 35 }
         };
 
+        // Puntaje de una foto contra la lista de colores buscados: suma de las
+        // distancias mínimas (menor = mejor coincidencia). Ordena los resultados.
+        function colorMatchScore(targets, palette) {
+            let score = 0;
+            for (const target of targets) {
+                let best = Infinity;
+                for (const p of palette) {
+                    const d = colorDistance(target, p);
+                    if (d < best) best = d;
+                }
+                score += best === Infinity ? 999 : best;
+            }
+            return score;
+        }
+
         function matchesCustomColor(target, entry, tolName) {
             const tol = COLOR_TOLERANCE[tolName] || COLOR_TOLERANCE.normal;
             if (colorDistance(target, entry) <= tol.dist) return true;
@@ -1800,7 +1815,10 @@
             if (existingNoResults) existingNoResults.remove();
 
             if (!color) {
-                allContainers.forEach(container => { container.style.display = ''; });
+                allContainers.forEach(container => {
+                    container.style.display = '';
+                    container.style.order = ''; // deshacer el orden por coincidencia
+                });
                 return;
             }
 
@@ -1811,6 +1829,7 @@
             allContainers.forEach(container => {
                 const img = container.querySelector('img');
                 const imageId = container.dataset.imageId;
+                container.style.order = '';
                 if (!imageId) {
                     container.style.display = 'none';
                     return;
@@ -1913,8 +1932,16 @@
                     const palette = (entry && Array.isArray(entry.p)) ? entry.p : [];
                     // Combinación: la foto tiene que contener TODOS los colores pedidos.
                     const match = colors.every(target => palette.some(p => matchesCustomColor(target, p, tolName)));
-                    container.style.display = match ? '' : 'none';
-                    if (match) visibleCount++;
+                    if (match) {
+                        container.style.display = '';
+                        // La grilla es CSS grid: order acomoda las mejores
+                        // coincidencias primero sin mover el DOM.
+                        container.style.order = Math.round(colorMatchScore(colors, palette));
+                        visibleCount++;
+                    } else {
+                        container.style.display = 'none';
+                        container.style.order = '';
+                    }
                     if (analyzed % 5 === 0 || analyzed === toAnalyze.length) {
                         status.textContent = `Analizando colores ${analyzed}/${toAnalyze.length}… ${visibleCount} coinciden`;
                     }
@@ -1928,7 +1955,11 @@
             updateUrlParams();
 
             const errNote = proxyErrors > 0 ? ` (${proxyErrors} fotos no se pudieron analizar, reintentá)` : '';
-            status.textContent = `${visibleCount} de ${toAnalyze.length} fotos de esta página coinciden${errNote}`;
+            let summary = `${visibleCount} de ${toAnalyze.length} fotos de esta página coinciden — ordenadas de mejor a peor${errNote}`;
+            if (toAnalyze.length >= 20 && visibleCount > toAnalyze.length / 2) {
+                summary += '. Ese color es muy común en estas fotos: combiná 2-3 colores (shift+click en los chips del modal) para afinar';
+            }
+            status.textContent = summary;
 
             if (visibleCount === 0) {
                 const hexes = colors.map(c => rgbToHex(c[0], c[1], c[2])).join(' + ');
@@ -2058,7 +2089,9 @@
                             const match = colors.every(t => palette.some(p => matchesCustomColor(t, p, tolName)));
                             if (match) {
                                 matches.push(image);
-                                gallery.appendChild(createImageContainer(image, matches.length - 1));
+                                const node = createImageContainer(image, matches.length - 1);
+                                node.style.order = Math.round(colorMatchScore(colors, palette));
+                                gallery.appendChild(node);
                             }
                             if (analyzed % 10 === 0) updateStatus();
                         });
