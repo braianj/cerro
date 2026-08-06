@@ -1467,9 +1467,11 @@
 
         // Persistent color cache in localStorage
         const COLOR_CACHE_KEY = 'cerro-image-colors';
+        // v5: purga caches envenenados por la caída de corsproxy del 2026-08-05
+        // (el código anterior guardaba paletas vacías en cada error de red, y esas
+        // fotos jamás volvían a matchear ningún color).
         // v4: el formato pasó de ['rojo', ...] a {c: [categorías], p: [paleta rgb]}.
-        // El bump invalida el cache viejo de todos los usuarios a propósito.
-        const COLOR_CACHE_VERSION = 'v4';
+        const COLOR_CACHE_VERSION = 'v5';
         function loadColorCache() {
             try {
                 const raw = localStorage.getItem(COLOR_CACHE_KEY);
@@ -1480,9 +1482,11 @@
                     return;
                 }
                 for (const [id, entry] of Object.entries(parsed)) {
-                    // Solo entradas con el formato v4; cualquier otra cosa se descarta.
-                    if (id !== '_version' && entry && Array.isArray(entry.c)) {
-                        imageColors.set(id, { c: entry.c, p: Array.isArray(entry.p) ? entry.p : [] });
+                    // Solo entradas con formato válido Y paleta no vacía: una paleta
+                    // vacía es señal de análisis fallido, mejor re-analizar esa foto.
+                    if (id !== '_version' && entry && Array.isArray(entry.c) &&
+                        Array.isArray(entry.p) && entry.p.length > 0) {
+                        imageColors.set(id, { c: entry.c, p: entry.p });
                     }
                 }
             } catch(e) { localStorage.removeItem(COLOR_CACHE_KEY); }
