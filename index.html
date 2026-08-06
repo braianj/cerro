@@ -749,7 +749,7 @@
                 <button onclick="loadImages(1)">Filtrar</button>
             </div>
             <div class="color-palette" id="colorPalette">
-                <span class="color-palette-label" title="Analiza los colores de las fotos de esta página. Para leer los píxeles, las URLs de las imágenes pasan por un proxy externo (corsproxy.io o allorigins.win).">Color:</span>
+                <span class="color-palette-label" title="Analiza los colores de las fotos de esta página. Para leer los píxeles, las URLs de las imágenes pasan por un proxy externo (wsrv.nl, corsproxy.io o allorigins.win).">Color:</span>
                 <div class="color-swatch-all active" onclick="filterByColor('')" title="Todos los colores"></div>
                 <div class="color-swatch" style="background-color: #e74c3c;" onclick="filterByColor('rojo')" title="Rojo" data-color="rojo"></div>
                 <div class="color-swatch" style="background-color: #e67e22;" onclick="filterByColor('naranja')" title="Naranja" data-color="naranja"></div>
@@ -1039,6 +1039,10 @@
             const currentValue = tagSelect.value;
 
             tagSelect.innerHTML = '<option value="">Todas las etiquetas</option>';
+
+            // La API puede traer entradas con tag null o vacío (regla 1: dato no
+            // confiable); sin este filtro, un solo null rompía todo el dropdown.
+            tagsArray = tagsArray.filter(t => t && typeof t.tag === 'string' && t.tag.trim());
 
             // Sort tags by count (descending) then by name
             const sortedTags = tagsArray.sort((a, b) => {
@@ -1516,9 +1520,17 @@
         loadColorCache();
 
         // Proxies CORS para leer píxeles (el S3 de foti.ar no manda CORS headers,
-        // verificado 2026-08-05). Si el primero falla (rate limit 429, caída),
-        // se prueba el siguiente; el que funciona pasa a ser el preferido.
+        // verificado 2026-08-05). Si el primero falla, se prueba el siguiente;
+        // el que funciona pasa a ser el preferido.
+        // wsrv.nl va primero: es un CDN dedicado a imágenes (images.weserv.nl),
+        // estable y con CORS correcto. Sin resize del lado del servidor: su
+        // resampler (Lanczos) desatura acentos pastel y cambia las paletas
+        // respecto del drawImage del canvas — verificado 2026-08-06 con un
+        // match que aparecía con la imagen original y desaparecía con w=160.
+        // Los genéricos quedan de fallback: ese mismo día corsproxy devolvía
+        // 403 y allorigins 520 — ninguno solo es confiable.
         const PROXY_BUILDERS = [
+            (u) => 'https://wsrv.nl/?url=' + encodeURIComponent(u),
             (u) => 'https://corsproxy.io/?' + encodeURIComponent(u),
             (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u)
         ];

@@ -30,12 +30,16 @@ their CORS headers, or what they sanitize.
 
 1. **`api1.foti.ar`** — the photo API. POST, no auth, no API key. Supplies
    images, photographer names, tags and EXIF.
-2. **CORS proxies** (`corsproxy.io`, `api.allorigins.win`) — proxy image bytes
-   so canvas can read pixels for the color filter; the S3 bucket sends no CORS
-   headers (verified 2026-08-05: 200 without `Access-Control-Allow-Origin`,
-   OPTIONS 403). `PROXY_BUILDERS` is a fallback chain with retry/backoff —
-   corsproxy.io alone rate-limited (429) under real usage. Every URL sent
-   through a proxy is visible to that service.
+2. **CORS proxies** (`wsrv.nl` primary; `corsproxy.io`, `api.allorigins.win`
+   fallbacks) — proxy image bytes so canvas can read pixels for the color
+   filter; the S3 bucket sends no CORS headers (verified 2026-08-05: 200
+   without `Access-Control-Allow-Origin`, OPTIONS 403). `PROXY_BUILDERS` is a
+   fallback chain with retry/backoff — on 2026-08-06 corsproxy returned 403
+   and allorigins 520 simultaneously; no single free proxy is reliable. Do NOT
+   use wsrv's server-side resize (`&w=160`): its resampler desaturates pastel
+   accents and changes palettes vs the canvas pipeline (verified — a real
+   match disappeared). Every URL sent through a proxy is visible to that
+   service.
 
 ## Hard rules
 
