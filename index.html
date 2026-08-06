@@ -1466,16 +1466,21 @@
             const [eh, es, el] = rgbToHsl(entry[0], entry[1], entry[2]);
             if (ts < 15 || es < 15) return false; // la regla de tono es solo para colores vivos
             const hueDiff = Math.min(Math.abs(th - eh), 360 - Math.abs(th - eh));
-            return hueDiff <= tol.hue && Math.abs(tl - el) <= tol.light && Math.abs(ts - es) <= tol.sat;
+            // Cap de saturación a 85: los colores elegidos de un picker vienen a
+            // S=100 y en un JPEG real nada llega a esa pureza; sin el cap, buscar
+            // el color "ideal" nunca encuentra el color real.
+            const tsEff = Math.min(ts, 85);
+            const esEff = Math.min(es, 85);
+            return hueDiff <= tol.hue && Math.abs(tl - el) <= tol.light && Math.abs(tsEff - esEff) <= tol.sat;
         }
 
         // Persistent color cache in localStorage
         const COLOR_CACHE_KEY = 'cerro-image-colors';
-        // v5: purga caches envenenados por la caída de corsproxy del 2026-08-05
-        // (el código anterior guardaba paletas vacías en cada error de red, y esas
-        // fotos jamás volvían a matchear ningún color).
+        // v6: los acentos ahora se agrupan por matiz Y banda de saturación; las
+        // paletas v5 tienen acentos diluidos y no son comparables.
+        // v5: purga caches envenenados por la caída de corsproxy del 2026-08-05.
         // v4: el formato pasó de ['rojo', ...] a {c: [categorías], p: [paleta rgb]}.
-        const COLOR_CACHE_VERSION = 'v5';
+        const COLOR_CACHE_VERSION = 'v6';
         function loadColorCache() {
             try {
                 const raw = localStorage.getItem(COLOR_CACHE_KEY);
@@ -1595,7 +1600,11 @@
 
                 const [h, s] = rgbToHsl(r, g, b);
                 if (s >= ACCENT_MIN_SAT) {
-                    const bin = Math.floor(h / 15) % 24;
+                    // Banda de saturación además del matiz: sin esto, un casco rosa
+                    // vivo se promedia con píxeles rosados apagados del mismo matiz
+                    // y el acento resultante queda demasiado desaturado para matchear
+                    // (caso real verificado 2026-08-06).
+                    const bin = (Math.floor(h / 15) % 24) * 2 + (s >= 55 ? 1 : 0);
                     let hacc = hueBins.get(bin);
                     if (!hacc) {
                         hacc = [0, 0, 0, 0];
@@ -1641,7 +1650,7 @@
             accents.sort(byShare);
 
             const palette = dominant.slice(0, 8)
-                .concat(accents.slice(0, 6))
+                .concat(accents.slice(0, 8))
                 .map(([r, g, b, share]) => [r, g, b, Math.max(1, Math.round(share * 1000))]);
 
             return { c: cats, p: palette };
