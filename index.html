@@ -1966,10 +1966,21 @@
             status.textContent = summary;
 
             if (visibleCount === 0) {
+                // Escalado automático: los colores elegidos de un picker (saturación
+                // ~100%) no existen tal cual en un JPEG real. Antes de decir "nada",
+                // se reintenta con la tolerancia siguiente. Las paletas ya están
+                // extraídas, así que el reintento es instantáneo (sin proxy).
+                const nextTol = { exacto: 'normal', normal: 'amplio' }[tolName];
+                if (nextTol) {
+                    document.getElementById('colorTolerance').value = nextTol;
+                    status.textContent = `0 resultados con tolerancia "${tolName}": reintentando con "${nextTol}"…`;
+                    applyCustomColor();
+                    return;
+                }
                 const hexes = colors.map(c => rgbToHex(c[0], c[1], c[2])).join(' + ');
                 const noResults = document.createElement('div');
                 noResults.className = 'no-color-results';
-                noResults.textContent = `Ninguna imagen de esta página contiene ${colors.length > 1 ? 'los colores' : 'el color'} ${hexes} (tolerancia: ${tolName}). Probá "Buscar en todo el rango", con tolerancia "Amplio", o en otra página.`;
+                noResults.textContent = `Ninguna imagen de esta página contiene ${colors.length > 1 ? 'los colores' : 'el color'} ${hexes}, ni siquiera con tolerancia amplia. Probá "Buscar en todo el rango" o en otra página.`;
                 noResults.style.cssText = 'text-align:center;padding:40px;color:#666;font-size:16px;grid-column:1/-1;';
                 gallery.appendChild(noResults);
             }
@@ -2122,11 +2133,20 @@
                 : ' — búsqueda completa');
 
             if (matches.length === 0) {
+                // Mismo escalado automático que en el filtro de página. Lo ya
+                // analizado quedó cacheado: la nueva pasada no repite el proxy.
+                const nextTol = { exacto: 'normal', normal: 'amplio' }[tolName];
+                if (nextTol) {
+                    document.getElementById('colorTolerance').value = nextTol;
+                    status.textContent = `0 resultados en el rango con tolerancia "${tolName}": reintentando con "${nextTol}"…`;
+                    searchEntireRange();
+                    return;
+                }
                 const hexes = colors.map(c => rgbToHex(c[0], c[1], c[2])).join(' + ');
                 gallery.innerHTML = '';
                 const noResults = document.createElement('div');
                 noResults.className = 'no-color-results';
-                noResults.textContent = `Ninguna foto del rango contiene ${colors.length > 1 ? 'los colores' : 'el color'} ${hexes} (tolerancia: ${tolName}).`;
+                noResults.textContent = `Ninguna foto del rango contiene ${colors.length > 1 ? 'los colores' : 'el color'} ${hexes}, ni siquiera con tolerancia amplia.`;
                 noResults.style.cssText = 'text-align:center;padding:40px;color:#666;font-size:16px;grid-column:1/-1;';
                 gallery.appendChild(noResults);
             }
