@@ -1932,11 +1932,15 @@
             let proxyErrors = 0;
             const promises = [];
 
+            // Ocultar todo de entrada y revelar solo las coincidencias.
+            // Al revés (todo visible, ocultando de a una) el usuario mira una
+            // pared de fotos sin filtrar durante todo el análisis.
+            allContainers.forEach(c => { c.style.display = 'none'; });
+
             allContainers.forEach(container => {
                 const img = container.querySelector('img');
                 const imageId = container.dataset.imageId;
                 if (!imageId) {
-                    container.style.display = 'none';
                     return;
                 }
 
@@ -1955,7 +1959,6 @@
                         container.style.order = Math.round(colorMatchScore(colors, palette));
                         visibleCount++;
                     } else {
-                        container.style.display = 'none';
                         container.style.order = '';
                     }
                     if (analyzed % 5 === 0 || analyzed === toAnalyze.length) {
