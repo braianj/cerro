@@ -108,6 +108,13 @@ params in the URL. Watch the browser console for errors the whole time.
   scroll (hides title/date; on mobile also the date filters). Its `z-index`
   is 100 — above photos (10), below the modal (1000+). Keep new overlays out
   of that band.
+- **"Fotos de esta persona" (`showNearbyPhotos`) beats color for finding one
+  person.** Photographers shoot a burst per subject, so same-photographer
+  photos within ±20s are almost always the same person; color finds colors and
+  returns crowds (a pink helmet matched 153 photos in one day, mostly other
+  people). It reads only API metadata — no pixel proxy. Windows escalate via
+  `NEARBY_WINDOWS`; in a race, runners pass every ~30s, so a wider window adds
+  other people, not more of this one. Shareable as `?near=<id>`.
 - **`?photo=<id>` opens that photo's modal** once the grid renders; `openModal`
   writes the param and `closeModal` removes it, so the address bar always
   matches what's on screen. Sharing relies on the rest of the params (dates,

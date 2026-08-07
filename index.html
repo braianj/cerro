@@ -598,6 +598,21 @@
             background-color: #2980b9;
         }
 
+        .nearby-btn {
+            background-color: #8e44ad;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+
+        .nearby-btn:hover {
+            background-color: #7d3c98;
+        }
+
         .toast {
             position: fixed;
             bottom: 24px;
@@ -882,6 +897,7 @@
                 <button class="watermark-link-btn" id="watermarkLinkBtn" onclick="openWatermarkRemover(event)">Remover
                     marca de agua</button>
                 <button class="download-btn" id="downloadBtn" onclick="downloadImage(event)">Descargar</button>
+                <button class="nearby-btn" id="nearbyBtn" onclick="showNearbyPhotos(event)" title="Ver las fotos que el mismo fotógrafo sacó en los segundos vecinos: casi siempre son de la misma persona">Fotos de esta persona</button>
                 <button class="share-btn" id="shareBtn" onclick="sharePhoto(event)" title="Copiar el link directo a esta foto">Compartir</button>
                 <span class="close" onclick="closeModal()">&times;</span>
             </div>
@@ -906,6 +922,9 @@
         let currentModalIndex = -1; // Index of current image in modal
         let openModalImageId = null; // _id de la foto abierta: alimenta ?photo= en la URL
         let pendingPhotoFromUrl = null; // ?photo=<id> espera a que la galería renderice
+        let nearbyAnchorId = null; // foto que originó la vista "fotos de esta persona"
+        let nearbyAnchorImage = null; // objeto de esa foto: permite ampliar la ventana
+        let pendingNearFromUrl = null; // ?near=<id> espera a que la galería renderice
         let tabSwitchVersion = 0; // Race condition guard
         let favoriteImageCache = JSON.parse(localStorage.getItem('cerro-favorites-cache') || '{}'); // Cache full image objects
 
@@ -945,7 +964,8 @@
                 tab: urlParams.get('tab') || 'gallery',
                 color: urlParams.get('color') || '',
                 tol: urlParams.get('tol') || '',
-                photo: urlParams.get('photo') || ''
+                photo: urlParams.get('photo') || '',
+                near: urlParams.get('near') || ''
             };
         }
 
@@ -996,6 +1016,7 @@
                 urlParams.set('color', customColorActive.map(c => rgbToHex(c[0], c[1], c[2]).slice(1)).join(','));
                 urlParams.set('tol', document.getElementById('colorTolerance').value);
             }
+            if (nearbyAnchorId) urlParams.set('near', nearbyAnchorId);
             // Con el modal abierto la URL apunta a esa foto, así copiar la barra
             // de direcciones (o usar Compartir) comparte la foto y no solo el listado.
             if (openModalImageId) urlParams.set('photo', openModalImageId);
@@ -1025,6 +1046,7 @@
             if (params.tab === 'favorites') switchTab('favorites', true);
             // La foto se abre recién cuando la galería terminó de renderizar.
             if (params.photo) pendingPhotoFromUrl = params.photo;
+            if (params.near) pendingNearFromUrl = params.near;
             if (params.color) {
                 const colors = parseColorList(params.color);
                 if (colors) {
@@ -1816,6 +1838,9 @@
 
         async function fetchImages(page = 1) {
             const myVersion = tabSwitchVersion;
+            // volver al listado normal cierra la vista de cercanas
+            nearbyAnchorId = null;
+            nearbyAnchorImage = null;
             const dateFrom = document.getElementById('dateFrom').value + 'T00:00:00.000Z';
             const dateTo = document.getElementById('dateTo').value + 'T23:59:59.999Z';
             const selectedPhotographer = document.getElementById('photographer').value;
@@ -2381,6 +2406,23 @@
                 }
             }
 
+            // ?near=<id>: reconstruir la vista "fotos de esta persona".
+            // Se consume antes de llamar para no reentrar por el displayImages
+            // que hace la propia búsqueda.
+            if (pendingNearFromUrl) {
+                const wantedNear = pendingNearFromUrl;
+                pendingNearFromUrl = null;
+                pendingPhotoFromUrl = null;
+                const anchor = images.find(i => i._id === wantedNear);
+                if (anchor) {
+                    currentModalIndex = images.indexOf(anchor);
+                    showNearbyPhotos(null);
+                } else {
+                    showToast('La foto de referencia no está en esta página o el link venció');
+                }
+                return;
+            }
+
             // ?photo=<id>: abrir esa foto una vez que está en la grilla.
             if (pendingPhotoFromUrl) {
                 const wanted = pendingPhotoFromUrl;
@@ -2510,6 +2552,103 @@
             navigator.clipboard.writeText(link)
                 .then(() => restore('¡Link copiado!'))
                 .catch(() => showToast('No se pudo copiar. El link está en la barra de direcciones.'));
+        }
+
+        // ---- Fotos de la misma persona (vecindad temporal) ----
+        // Los fotógrafos disparan una ráfaga por cada persona que pasa: las fotos
+        // del mismo fotógrafo en los segundos vecinos son casi siempre de esa
+        // misma persona. Para "todas las fotos de alguien" esto es mucho más
+        // preciso que el color, y sale de metadata: no toca el proxy de píxeles.
+        // ±20s cubre la ráfaga de una persona sin traer al que pasó antes:
+        // en una carrera los corredores se suceden cada ~30s. Se puede ampliar
+        // desde el botón que aparece en el estado.
+        const NEARBY_WINDOWS = [20, 60, 180, 600];
+
+        async function showNearbyPhotos(event, windowSeconds) {
+            if (event) event.stopPropagation();
+            // Con windowSeconds se está ampliando una búsqueda ya hecha: la
+            // referencia es el ancla guardada. Sin él, arranca de la foto abierta.
+            const win = windowSeconds || NEARBY_WINDOWS[0];
+            const image = windowSeconds
+                ? nearbyAnchorImage
+                : currentImages[currentModalIndex];
+            if (!image || !image.creationDate) return;
+            nearbyAnchorImage = image;
+
+            const photographer = image.photographerData?.name || null;
+            const center = new Date(image.creationDate).getTime();
+            const day = image.creationDate.slice(0, 10);
+            const anchorId = image._id;
+
+            closeModal();
+            stopRangeSearch();
+            // Un filtro de color activo no debe recortar esta vista.
+            selectedColorFilter = '';
+            resetCustomColorUI();
+            document.querySelectorAll('.color-swatch, .color-swatch-all').forEach(s => s.classList.remove('active'));
+            document.querySelector('.color-swatch-all')?.classList.add('active');
+
+            const status = document.getElementById('colorSearchStatus');
+            status.textContent = 'Buscando fotos de la misma persona…';
+            showLoading(true);
+
+            try {
+                const response = await fetch('https://api1.foti.ar/images/search/client', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filters: {
+                            date: { from: `${day}T00:00:00.000Z`, to: `${day}T23:59:59.999Z` },
+                            photographer: null,
+                            order: { by: "creationDate", order: "1" },
+                            tags: [],
+                            favorites: { active: false, images: [] },
+                            purchases: { active: false, images: [] }
+                        },
+                        pagination: { perPage: 5000, actualPage: 1 },
+                        purchased: []
+                    })
+                });
+                if (!response.ok) throw new Error(`Error ${response.status}`);
+                const data = await response.json();
+                const all = (data.ok && data.images) ? data.images : [];
+
+                const near = all.filter(i => {
+                    if ((i.photographerData?.name || null) !== photographer) return false;
+                    const t = new Date(i.creationDate).getTime();
+                    return Math.abs(t - center) <= win * 1000;
+                }).sort((a, b) => new Date(a.creationDate) - new Date(b.creationDate));
+
+                if (near.length === 0) {
+                    status.textContent = 'No se encontraron fotos cercanas de ese fotógrafo';
+                    return;
+                }
+
+                currentImages = near;
+                nearbyAnchorId = anchorId;
+                displayImages(near);
+
+                const hora = new Date(image.creationDate).toLocaleTimeString('es-ES');
+                status.textContent = `${near.length} foto${near.length === 1 ? '' : 's'} de ` +
+                    `${photographer || 'ese fotógrafo'} a ±${win}s de las ${hora}. `;
+
+                // Ampliar la ventana: en una carrera los corredores se suceden,
+                // así que más ventana trae más gente, no más fotos de esta persona.
+                const nextWin = NEARBY_WINDOWS.find(w => w > win);
+                if (nextWin) {
+                    const more = document.createElement('button');
+                    more.type = 'button';
+                    more.className = 'custom-color-btn';
+                    more.textContent = `Ampliar a ±${nextWin >= 60 ? (nextWin / 60) + ' min' : nextWin + 's'}`;
+                    more.onclick = () => showNearbyPhotos(null, nextWin);
+                    status.appendChild(more);
+                }
+            } catch (error) {
+                console.error('Error buscando fotos cercanas:', error);
+                status.textContent = 'No se pudieron cargar las fotos cercanas: ' + error.message;
+            } finally {
+                showLoading(false);
+            }
         }
 
         // Aviso breve, sin bloquear como alert().

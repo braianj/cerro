@@ -20,6 +20,10 @@ Una galería web moderna para visualizar imágenes con filtros avanzados y funci
 
 - **Barra de búsqueda fija**: el header queda pegado arriba y se compacta al
   scrollear, así los filtros y la paleta están siempre a mano
+- **Fotos de esta persona**: al abrir una foto, este botón trae las que el
+  mismo fotógrafo sacó en los segundos vecinos (su ráfaga). Es la forma más
+  precisa de juntar todas las fotos de alguien; el filtro de color encuentra
+  colores, no personas
 - **Compartir una foto**: al abrir una foto la URL apunta a ella
   (`?photo=<id>`) y el botón Compartir copia ese link (en celular abre el
   menú nativo). Quien lo abre cae en la misma vista con la foto en pantalla
