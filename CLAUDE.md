@@ -108,6 +108,11 @@ params in the URL. Watch the browser console for errors the whole time.
   scroll (hides title/date; on mobile also the date filters). Its `z-index`
   is 100 — above photos (10), below the modal (1000+). Keep new overlays out
   of that band.
+- **Tags are the cheapest filter and were broken until 2026-08-07.** `?tags=`
+  used to set `#tags.value` before `loadAllTags()` had populated the
+  `<option>`s, so the filter silently did nothing. It now parks in
+  `pendingTagFromUrl` and `populateTagsFromApi` applies it and reloads. Tags
+  narrow far harder than color (an event tag cut 26k photos to 241).
 - **"Fotos de esta persona" (`showNearbyPhotos`) beats color for finding one
   person.** Photographers shoot a burst per subject, so same-photographer
   photos within ±20s are almost always the same person; color finds colors and

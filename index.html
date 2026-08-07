@@ -925,6 +925,7 @@
         let nearbyAnchorId = null; // foto que originó la vista "fotos de esta persona"
         let nearbyAnchorImage = null; // objeto de esa foto: permite ampliar la ventana
         let pendingNearFromUrl = null; // ?near=<id> espera a que la galería renderice
+        let pendingTagFromUrl = null; // ?tags=<tag> espera a que se pueble el dropdown
         let tabSwitchVersion = 0; // Race condition guard
         let favoriteImageCache = JSON.parse(localStorage.getItem('cerro-favorites-cache') || '{}'); // Cache full image objects
 
@@ -1039,9 +1040,11 @@
             if (params.dateTo) document.getElementById('dateTo').value = params.dateTo;
             if (params.photographer) document.getElementById('photographer').value = params.photographer;
             if (params.tags) {
-                const decodedTag = decodeUrlTag(params.tags);
-                document.getElementById('tags').value = decodedTag;
-                console.log('Applied tag from URL:', decodedTag, '(original:', params.tags, ')');
+                // El <select> de etiquetas se puebla después (loadAllTags es async),
+                // así que acá todavía no existe la opción: asignar .value no haría
+                // nada y el filtro se perdía. Se guarda y lo aplica populateTagsFromApi.
+                pendingTagFromUrl = decodeUrlTag(params.tags);
+                console.log('Tag pendiente de la URL:', pendingTagFromUrl);
             }
             if (params.tab === 'favorites') switchTab('favorites', true);
             // La foto se abre recién cuando la galería terminó de renderizar.
@@ -1167,8 +1170,15 @@
                 tagSelect.appendChild(option);
             });
 
+            // Un ?tags= de la URL espera acá: el dropdown recién ahora tiene las
+            // opciones. Se resuelve con la misma tolerancia que una selección previa.
+            const wanted = pendingTagFromUrl || currentValue;
+            const applyingFromUrl = !!pendingTagFromUrl;
+            pendingTagFromUrl = null;
+
             // Restore previous selection if it still exists
-            if (currentValue) {
+            if (wanted) {
+                const currentValue = wanted;
                 // Try exact match first
                 let foundTag = sortedTags.find(tagObj => tagObj.tag.trim() === currentValue);
 
@@ -1190,9 +1200,12 @@
                 if (foundTag) {
                     tagSelect.value = foundTag.tag.trim();
                     console.log('Restored tag selection:', foundTag.tag.trim());
+                    // Si vino de la URL, la galería ya cargó sin el filtro: recargar.
+                    if (applyingFromUrl) loadImages(currentPage);
                 } else {
                     console.log('Could not find matching tag for:', currentValue);
                     console.log('Available tags:', sortedTags.map(t => t.tag.trim()));
+                    if (applyingFromUrl) showToast(`La etiqueta "${currentValue}" no existe en estas fechas`);
                 }
             }
 
