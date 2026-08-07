@@ -25,12 +25,39 @@
             padding: 10px;
         }
 
+        /* Fijo arriba: los filtros y la paleta quedan accesibles mientras se
+           recorre la galería. z-index 100 lo pone sobre las fotos (10) y bajo
+           el modal (1000+). */
         header {
             background-color: white;
             padding: 15px;
             border-radius: 10px;
             margin-bottom: 20px;
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        /* Al scrollear se compacta para no comerse la pantalla: se ocultan
+           título y fecha, quedan tabs, filtros y paleta. */
+        header.compact {
+            padding: 8px 15px;
+            border-top-left-radius: 0;
+            border-top-right-radius: 0;
+            box-shadow: 0 3px 12px rgba(0, 0, 0, 0.18);
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        header.compact h1,
+        header.compact .last-update {
+            display: none;
+        }
+
+        header.compact .view-tabs,
+        header.compact .date-filters {
+            margin-bottom: 8px;
         }
 
         header h1 {
@@ -556,6 +583,45 @@
             background-color: #229954;
         }
 
+        .share-btn {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+
+        .share-btn:hover {
+            background-color: #2980b9;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: #2c3e50;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            z-index: 1100;
+            max-width: 90vw;
+            text-align: center;
+        }
+
+        .toast.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
         .close {
             color: #aaa;
             font-size: 24px;
@@ -635,6 +701,17 @@
             .date-filters {
                 flex-direction: column;
                 gap: 8px;
+            }
+
+            /* En móvil los filtros van en columna y el header compacto se
+               comería la pantalla. Fecha/fotógrafo/etiquetas se eligen una vez;
+               scrolleando solo hacen falta las pestañas y la paleta. */
+            header.compact .date-filters {
+                display: none;
+            }
+
+            header.compact {
+                max-height: 45vh;
             }
 
             .date-filters input[type="date"],
@@ -805,6 +882,7 @@
                 <button class="watermark-link-btn" id="watermarkLinkBtn" onclick="openWatermarkRemover(event)">Remover
                     marca de agua</button>
                 <button class="download-btn" id="downloadBtn" onclick="downloadImage(event)">Descargar</button>
+                <button class="share-btn" id="shareBtn" onclick="sharePhoto(event)" title="Copiar el link directo a esta foto">Compartir</button>
                 <span class="close" onclick="closeModal()">&times;</span>
             </div>
             <img id="modalImage" src="" alt="">
@@ -826,6 +904,8 @@
         let tagsLoaded = false; // Flag to prevent reloading tags
         let currentTab = 'gallery'; // 'gallery' or 'favorites'
         let currentModalIndex = -1; // Index of current image in modal
+        let openModalImageId = null; // _id de la foto abierta: alimenta ?photo= en la URL
+        let pendingPhotoFromUrl = null; // ?photo=<id> espera a que la galería renderice
         let tabSwitchVersion = 0; // Race condition guard
         let favoriteImageCache = JSON.parse(localStorage.getItem('cerro-favorites-cache') || '{}'); // Cache full image objects
 
@@ -864,7 +944,8 @@
                 tags: urlParams.get('tags') || '',
                 tab: urlParams.get('tab') || 'gallery',
                 color: urlParams.get('color') || '',
-                tol: urlParams.get('tol') || ''
+                tol: urlParams.get('tol') || '',
+                photo: urlParams.get('photo') || ''
             };
         }
 
@@ -915,6 +996,9 @@
                 urlParams.set('color', customColorActive.map(c => rgbToHex(c[0], c[1], c[2]).slice(1)).join(','));
                 urlParams.set('tol', document.getElementById('colorTolerance').value);
             }
+            // Con el modal abierto la URL apunta a esa foto, así copiar la barra
+            // de direcciones (o usar Compartir) comparte la foto y no solo el listado.
+            if (openModalImageId) urlParams.set('photo', openModalImageId);
 
             // Update URL without reloading page
             const newUrl = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '');
@@ -939,6 +1023,8 @@
                 console.log('Applied tag from URL:', decodedTag, '(original:', params.tags, ')');
             }
             if (params.tab === 'favorites') switchTab('favorites', true);
+            // La foto se abre recién cuando la galería terminó de renderizar.
+            if (params.photo) pendingPhotoFromUrl = params.photo;
             if (params.color) {
                 const colors = parseColorList(params.color);
                 if (colors) {
@@ -2294,6 +2380,18 @@
                     resetCustomColorUI();
                 }
             }
+
+            // ?photo=<id>: abrir esa foto una vez que está en la grilla.
+            if (pendingPhotoFromUrl) {
+                const wanted = pendingPhotoFromUrl;
+                pendingPhotoFromUrl = null;
+                const target = images.find(i => i._id === wanted);
+                if (target) {
+                    openModal(target);
+                } else {
+                    showToast('La foto compartida no está en esta página o el link venció');
+                }
+            }
         }
 
         function openModal(image) {
@@ -2303,6 +2401,8 @@
 
             // Track index for navigation
             currentModalIndex = currentImages.findIndex(i => i._id === image._id);
+            openModalImageId = image._id;
+            updateUrlParams();
 
             // Show/hide nav buttons
             document.getElementById('modalPrev').style.display = currentModalIndex > 0 ? '' : 'none';
@@ -2377,6 +2477,54 @@
         function closeModal() {
             document.getElementById('modal').style.display = 'none';
             currentModalIndex = -1;
+            openModalImageId = null;
+            updateUrlParams(); // saca ?photo= de la URL
+        }
+
+        // Copia el link directo a la foto abierta. La URL ya lleva los filtros
+        // vigentes (fechas, página, color), así que quien la abra cae en la
+        // misma vista con esa foto en pantalla.
+        function sharePhoto(event) {
+            event.stopPropagation();
+            const btn = event.currentTarget;
+            const link = window.location.href;
+            const restore = (msg) => {
+                const original = btn.textContent;
+                btn.textContent = msg;
+                setTimeout(() => { btn.textContent = original; }, 2000);
+            };
+
+            // El diálogo nativo solo en pantallas táctiles (ahí lleva a WhatsApp
+            // y demás). Chrome de escritorio también expone navigator.share, pero
+            // abrir ese diálogo en desktop confunde: se prefiere copiar el link.
+            const isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+            if (isTouch && navigator.share) {
+                navigator.share({ title: 'Foto - Galería Cerro', url: link })
+                    .catch(() => {/* usuario canceló */});
+                return;
+            }
+            if (!navigator.clipboard) {
+                showToast('Copiá el link desde la barra de direcciones');
+                return;
+            }
+            navigator.clipboard.writeText(link)
+                .then(() => restore('¡Link copiado!'))
+                .catch(() => showToast('No se pudo copiar. El link está en la barra de direcciones.'));
+        }
+
+        // Aviso breve, sin bloquear como alert().
+        function showToast(message) {
+            let toast = document.getElementById('toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'toast';
+                toast.className = 'toast';
+                document.body.appendChild(toast);
+            }
+            toast.textContent = message;
+            toast.classList.add('visible');
+            clearTimeout(showToast._timer);
+            showToast._timer = setTimeout(() => toast.classList.remove('visible'), 4000);
         }
 
         function navigateModal(direction, event) {
@@ -2615,6 +2763,21 @@
                 loadImages(currentPage);
             }
         });
+
+        // El header es sticky; al scrollear se compacta para dejar más lugar
+        // a las fotos sin perder los controles de búsqueda.
+        (function () {
+            const header = document.querySelector('header');
+            let ticking = false;
+            window.addEventListener('scroll', function () {
+                if (ticking) return;
+                ticking = true;
+                requestAnimationFrame(function () {
+                    header.classList.toggle('compact', window.scrollY > 60);
+                    ticking = false;
+                });
+            }, { passive: true });
+        })();
 
         // Keyboard navigation for modal
         document.addEventListener('keydown', function (e) {

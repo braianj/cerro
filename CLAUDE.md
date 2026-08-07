@@ -21,7 +21,7 @@ Rough layout of the file:
 | script: URL | `getUrlParams`, `updateUrlParams`, `applyUrlParams` |
 | script: data | `fetchImages`, `fetchPhotographers`, `loadAllTags`, `loadFavorites` |
 | script: color | `buildColorSummary`, `extractImageColors`, `filterByColor`, `applyCustomColor` |
-| script: render | `displayImages`, `openModal`, `updatePagination` |
+| script: render | `displayImages`, `createImageContainer`, `openModal`, `sharePhoto`, `showToast`, `updatePagination` |
 
 ## External services
 
@@ -104,6 +104,18 @@ params in the URL. Watch the browser console for errors the whole time.
   must contain all of them. `parseColorInput` handles one color,
   `parseColorList` handles the list; the URL uses comma-joined hex in
   `?color=` plus `&tol=`.
+- **The header is `position: sticky`** and gains `.compact` past 60px of
+  scroll (hides title/date; on mobile also the date filters). Its `z-index`
+  is 100 — above photos (10), below the modal (1000+). Keep new overlays out
+  of that band.
+- **`?photo=<id>` opens that photo's modal** once the grid renders; `openModal`
+  writes the param and `closeModal` removes it, so the address bar always
+  matches what's on screen. Sharing relies on the rest of the params (dates,
+  page, color) being in the same URL — a `photo` id alone will not resolve if
+  the photo is not in the loaded page.
+- **`sharePhoto` uses the native dialog only on `(pointer: coarse)`**. Chrome
+  desktop also exposes `navigator.share`, but opening that dialog on a desktop
+  is worse than copying the link.
 - **Cache writes are debounced** (`scheduleSaveColorCache`, 2s): a direct
   `saveColorCache()` per result is O(n²) when the range search analyzes
   thousands of photos. Proxy network errors are NOT cached (`err: true`
